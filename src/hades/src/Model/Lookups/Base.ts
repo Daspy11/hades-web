@@ -28,7 +28,7 @@ import { darkred } from "@/lib/Data/Colour";
 import { Just, Nothing, fromMaybe, isJust, mapMaybe, type Maybe } from "@/lib/Data/Maybe";
 import { Left, Right, type Either } from "@/lib/Data/Either";
 import { equals } from "@/lib/Data/Ord";
-import { formatDay } from "@/lib/Data/Time";
+import { showDay } from "@/lib/Data/Time";
 import type { Forest } from "@/lib/Data/Tree";
 import { absurd, showDouble, showInt } from "@/lib/Prelude";
 import {
@@ -42,9 +42,9 @@ import {
 } from "@/banana-ui/base/Reactive/Banana/ArrowDialog";
 import { Colour } from "@/banana-ui/base/Reactive/Banana/Common";
 import {
-  Name, type Entity, type EntityClass, type Model, type ModelEditCtx, type ModelError, type ModelId,
-  current, entityContents, evalModelEdit, followPath, goToRoot, nameField, nameText, show_Name,
-  throwUser,
+  JSON_Name, Name, type Entity, type EntityClass, type Model, type ModelEditCtx, type ModelError,
+  type ModelId, current, entityContents, evalModelEdit, followPath, goToRoot, nameField, nameText,
+  show_Name, throwUser,
 } from "@/hades/src/Model/Abstract/PackageTree";
 import { modelFilter } from "@/hades/src/Model/Abstract/Properties";
 import { fieldElement } from "@/hades/src/Model/Reflection/Dialogs";
@@ -103,7 +103,7 @@ function showsExtValue(v: ExtValue): string {
     case "ExtInt": return "ExtInt " + neg(showInt(v._0), v._0);
     case "ExtReal": return "ExtReal " + neg(showDouble(v._0), v._0);
     case "ExtText": return "ExtText " + T.showText(v._0);
-    case "ExtDate": return "ExtDate " + formatDay(v._0);
+    case "ExtDate": return "ExtDate " + showDay(v._0);
     default: return absurd(v);
   }
 }
@@ -130,7 +130,7 @@ const tableValuesJ: J.JSONCodec<M.Map<readonly [ExtValue, ExtValue], ExtValue>> 
 export const JSON_LookupTable: J.JSONCodec<LookupTable> = J.codec(
   (tbl) => J.object([
     ["type", J.textJ.toJSON("lookup-table")],
-    ["name", J.textJ.toJSON(view(tableName.dot(nameText), tbl))],
+    ["name", JSON_Name.toJSON(view(tableName, tbl))],
     ["horizontal", J.uuidJ.toJSON(view(horizontalAxis, tbl))],
     ["vertical", J.uuidJ.toJSON(view(verticalAxis, tbl))],
     ["output", J.uuidJ.toJSON(view(tableOutput, tbl))],
@@ -140,7 +140,7 @@ export const JSON_LookupTable: J.JSONCodec<LookupTable> = J.codec(
     const t = J.field(v, "type", J.textJ);
     if (t !== "lookup-table") J.fail(t + " is not a lookup table.");
     return LookupTable(
-      Name(T.strip(J.field(v, "name", J.textJ))), // FromJSON Name strips white space.
+      J.field(v, "name", JSON_Name),
       migrateField1(J.field(v, "horizontal", J.textJ)),
       migrateField1(J.field(v, "vertical", J.textJ)),
       migrateField1(J.field(v, "output", J.textJ)),
