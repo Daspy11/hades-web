@@ -1520,7 +1520,6 @@ export function menuBarNew(): MenuBar {
 export class Toolbar extends Container {
   override readonly kind: string = "toolbar";
   orientation: Orientation = "OrientationHorizontal";
-  style: any = {};
 }
 export function toolbarNew(): Toolbar {
   return new Toolbar();
@@ -1644,6 +1643,12 @@ export class Window extends Bin {
   accels = new Map<string, string>();
   /** The main application window fills the browser viewport. */
   isMain = false;
+  /**
+   * Browser extension: called on `beforeunload` (tab closed or reloaded). Returning `true` makes
+   * the browser ask the user to confirm leaving, which stands in for the desktop "save changes?"
+   * prompt that a `delete-event` handler would show.
+   */
+  unloadGuard: (() => boolean) | null = null;
   override setProperty(name: string, value: unknown): void {
     switch (name) {
       case "title": this.title = value as string; break;
@@ -1704,6 +1709,10 @@ export function windowPresent(w: Window): void {
   registerToplevel(w);
   w.visible = true;
   w.changed();
+}
+/** Browser extension: see `Window.unloadGuard`. */
+export function windowSetUnloadGuard(w: Window, guard: (() => boolean) | null): void {
+  w.unloadGuard = guard;
 }
 export function windowClose(w: Window): void {
   w.requestClose();

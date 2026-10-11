@@ -302,7 +302,7 @@ export class Widget extends GObject {
   el: HTMLElement | null = null;
   /** Arbitrary data attached with `g_object_set_data`-like calls. */
   data = new Map<string, unknown>();
-  private version = 0;
+  private _version = 0;
   private subscribers = new Set<() => void>();
   private mapped = false;
 
@@ -310,11 +310,11 @@ export class Widget extends GObject {
     this.subscribers.add(cb);
     return () => this.subscribers.delete(cb);
   };
-  readonly getVersion = (): number => this.version;
+  readonly getVersion = (): number => this._version;
 
   /** Notify the renderer that this widget must be re-rendered. */
   changed(): void {
-    this.version++;
+    this._version++;
     for (const cb of Array.from(this.subscribers)) cb();
   }
 

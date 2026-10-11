@@ -76,12 +76,13 @@ describe("arrow combinators", () => {
 
 describe("showGadget", () => {
   test("labelled containers", () => {
-    const g = Form("Vertical", [
-      ["Name", gDot(TextBox(() => prism_((s: string) => s, (s: string) => Just(s))), Null())],
-      ["Flag", Pure(() => (b: boolean) => b)],
+    const textId = prism_((s: string) => s, (s: string) => Just(s));
+    const g = Form<null, never, string>("Vertical", [
+      ["Name", gDot(Pure((s: string) => (_old: string) => s), TextBox(() => textId))],
+      ["Flag", Pure(() => (s: string) => s)],
     ]);
     expect(drawTree(showGadget(g))).toBe(
-      ["Form Vertical", "|", "+- Name: Dot", "|  |", "|  +- Null", "|  |", "|  `- TextBox", "|", "`- Flag: Pure"].join("\n"),
+      ["Form Vertical", "|", "+- Name: Dot", "|  |", "|  +- TextBox", "|  |", "|  `- Pure", "|", "`- Flag: Pure"].join("\n"),
     );
   });
 

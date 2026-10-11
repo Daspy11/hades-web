@@ -178,16 +178,17 @@ describe("Parse errors", () => {
     expect(parseError("Wibble(3)")).toBe("Not a valid function name: Wibble\n");
   });
 
-  it("reports bad dates and operators", () => {
+  it("reports bad dates and misplaced operators", () => {
     expect(parseError("'31 February 2018'")).toBe("Unreadable date: '31 February 2018'\n");
-    expect(parseError("4 +- 3")).toBe("Unrecognised operator +-\n");
+    // The operator parsers are wrapped in "try", so the custom error is backtracked over.
+    expect(parseError("4 +- 3")).toBe("unexpected '+'\nexpecting end of input or white space\n");
   });
 
   it("lists the expected items", () => {
     expect(parseError("4 5")).toBe(
       "unexpected '5'\nexpecting !=, &, *, +, ++, -, /, <, <=, =, >, >=, end of input, white space, or |\n");
     expect(parseError("")).toBe(
-      "unexpected end of input\nexpecting -, date, long name, name, number, string, or white space\n");
+      "unexpected end of input\nexpecting !, '(', -, date, long name, name, number, string, or white space\n");
     expect(parseError("\"abc")).toBe(
       "unexpected end of input\nexpecting '\"' or literal character\n");
   });

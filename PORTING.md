@@ -464,3 +464,35 @@ Decisions made while porting that other modules depend on. Read before importing
   Haskell field (`{ _rectangleShape: BoundBox }`) with constant isos (`rectangleShape`).
 * `src/hades/src/Hades/Abstract/Commands.test.ts` shows how to drive a diagram through
   `startDelta`/`applyDelta`/`runInner` — a useful template for testing diagram code.
+* **banana-ui base** (`GadgetPrimitives`/`ArrowDialog`): nullary Gadget constructors and plain
+  gadget values are zero-argument functions (`Null()`, `getEnv()`, `simpleTextBox()`,
+  `tickBox()`, `displayText()`, `colourBox()`, ...). Primed type names become `Gadget_`,
+  `GadgetF_`, `Dialog_`, `DialogSelector_`. Curried functions stored in constructors are
+  uncurried (`Validate._0(e, i, o)`; `DialogSelector` is `(e, i) => Maybe<Dialog>`).
+  `Show`/`Read`/`Enum` arguments are explicit: `typedTextBox(show, read)`, `simpleCombo(xs, show)`,
+  `boundedCombo(values, show)`, `rangeCombo(enumDict, [x1, x2], show)`. `ButtonIO` actions may
+  return a Promise. `disableApply`/`disableApply1` and the constructors come from `GadgetPrimitives`.
+* **Common**: `reactimate1(e)` / `reactimate1_(e)` (for `reactimate1'`) return deferred stop
+  actions; `textPrism(show, read)` and `textPrismInt`/`textPrismDouble`/`textPrismInteger`;
+  `Colour` is the lib `Colour` class (`Colour()`/`getColour()` are identities).
+* **Data.UUID.Generate**: `Generator` is an immutable deterministic generator (so replaying a
+  script yields the same new ids). The class name shadows TypeScript's `Generator` type: import it
+  as `import { Generator as UUIDGenerator } from ".../Data/UUID/Generate"` in modules that also
+  write generator functions.
+* **Table** (`Reactive.Banana.Table`): `EditBool`, `EditNote`, `EditColour`, `TableDelete`,
+  `TableShuffle` are constants; `enumField(values, show)`; `TableColumn` is `{ _0 }`.
+* **Data files** (`@/lib/System/Paths`): `getDataDir(pkg)` returns a virtual source path such as
+  `/src/dsm/share`; `getDataFileName(pkg, rel)` likewise; convert to a URL with
+  `dataFileUrl(path)`; `fetchDataFile(pkg, rel)`, `listDataFiles(pkg, dirPrefix)` (sorted,
+  relative to the data dir). Icon themes accept these paths in their search path.
+* **XML** (`@/lib/Text/XML/Light`, `.../Light/Types`, `.../Light/Cursor`): ports of the `xml`
+  package. `QName` values carry Haskell Eq/Ord on their prototype — build with `QName(...)`, never
+  spread. `Proc`, `Input` (`parseXML`), `Output` (`showTopElement`) and `Text.XML.Light.Lens` are
+  still to be added (by whoever ports `Model.Report.Docx*`) next to them.
+* **Walkable** (`Model.Report.Walkable`): instance dictionaries `Walkable_<A>_<B>` (`[Inline]` is
+  `InlineList`): `walk(w, f, b)`, `walkM(w, f, b)`, `query(w, monoid, f, b)`; `Monoid_List<A>()`.
+* **EditLock**: `tryEditLock(path, isWritable?)` returns a Promise; await `dropEditLock(l)`.
+  **Autosave**: storage functions are async; `autosaveProcess(codec, appName, interval, copies)`
+  returns its writer synchronously.
+* `@/lib/System/IO` provides virtual file paths (`/handle/...`, `/upload/...`, `/download/...`,
+  `/builtin/...`): `readFileText`, `readFileBytes`, `writeFileData`, `takeFileName` etc.

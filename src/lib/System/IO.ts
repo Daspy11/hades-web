@@ -247,6 +247,11 @@ function acceptOf(filters: readonly PickerFilter[]): string {
   return parts.join(",");
 }
 
+interface FilePickerAcceptType {
+  description?: string;
+  accept: Record<string, string[]>;
+}
+
 function pickerTypes(filters: readonly PickerFilter[]): FilePickerAcceptType[] {
   const r: FilePickerAcceptType[] = [];
   for (const f of filters) {

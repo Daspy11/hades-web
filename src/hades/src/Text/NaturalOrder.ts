@@ -13,8 +13,9 @@
  *    strings keep their exact value.
  *  - `Text` comparison in Haskell is by code point. JavaScript `<` compares UTF-16 code units,
  *    which differs for astral characters, so a code point comparison is used here.
- *  - `isSpace` and `T.toCaseFold` follow the Haskell definitions exactly (see `hsIsSpace`
- *    and `caseFold` below) rather than the approximations in the runtime library.
+ *  - `isSpace` follows the Haskell definition exactly and `T.toCaseFold` does full Unicode
+ *    case folding (see `hsIsSpace` and `caseFold` below), rather than using the approximations
+ *    in the runtime library (`/\s/` and `toLowerCase`).
  */
 import * as T from "@/lib/Data/Text";
 import { isDigit, isLetter, isMark } from "@/lib/Data/Char";
