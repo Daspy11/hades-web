@@ -1,0 +1,32 @@
+[Icon Theme]
+Name=Diametric
+Comment=Diametric Icon Theme
+
+Directories=scalable/road-signs,scalable/general,48x48/road-signs,48x48/general,
+
+[48x48/road-signs]
+Size=48
+Context=road-signs
+Type=Fixed
+MaxSize=512
+
+[48x48/general]
+Size=48
+Context=general
+Type=Fixed
+MaxSize=512
+
+[scalable/road-signs]
+MinSize=1
+Size=128
+MaxSize=512
+Context=road-signs
+Type=Scalable
+
+
+[scalable/general]
+MinSize=1
+Size=128
+MaxSize=512
+Context=general
+Type=Scalable
