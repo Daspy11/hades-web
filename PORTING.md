@@ -529,10 +529,16 @@ Decisions made while porting that other modules depend on. Read before importing
 
 ### Model.Abstract.{Properties,Import,ModelExport}, Model.Query.Base (E2)
 
-* `Codec.Xlsx` → `src/lib/Codec/Xlsx.ts`: data model only (`Xlsx`, `Worksheet`, `CellMap` keyed by
-  `[row, col]`, `Cell`, `CellValue` constructors, lenses `xlSheets`, `wsCells`, `cellValue`, ...).
-  Reading/writing `.xlsx` files (`toXlsx`/`fromXlsx`) is to be added there by whoever ports the
-  first module that needs it (Model.GI.Export / Model.Matrices.Excel), additively.
+* `Codec.Xlsx` → `src/lib/Codec/Xlsx.ts`: data model (`Xlsx`, `Worksheet`, `CellMap` keyed by
+  `[row, col]`, `Cell` with `_cellFormula`, `CellValue`/`CellFormula`/`NormalFormula`,
+  `ColumnsProperties` record with `cpMin..cpBestFit`, `RowProps(height, style, hidden)` with
+  `AutomaticHeight`/`CustomHeight`, merges as range strings, `Styles` raw XML) plus the pure
+  reader `toXlsxEither(bytes): Either<ParseError, Xlsx>` (`show_ParseError`) and writer
+  `fromXlsx(posixSeconds, xlsx): Uint8Array`. `Codec.Xlsx.Formatted` → `src/lib/Codec/Xlsx/Formatted.ts`:
+  `FormattedCell`, `Format`, `Font`, `Fill`, `FillPattern`, `Border`, `BorderStyle`, `Color`,
+  `Alignment`, `StdNumberFormat`, lenses (`formattedCell`, `formatFont`, `fontBold`, `colorARGB`,
+  ...), `def_*`, `minimalStyleSheet`, `formatted(cells, styleSheet)` → `{formattedCellMap,
+  formattedStyleSheet, formattedMerges}`, `renderStyleSheet`. Output verified with openpyxl.
 * `QueryStep<V>` = `{ runStep(outers, model, inputs) }` built with `QueryStep(f)`;
   `append_/mempty_/mconcat_QueryStep`, `noStep`, `inStep(q1, q2)`. Constrained steps take `cls`
   first even when unused: `step(cls, rels)`, `filterStep(cls, p)`, `parentStep(cls)`,

@@ -30,6 +30,7 @@
     "@radix-ui/react-tabs": "^1.1.22",
     "@radix-ui/react-toolbar": "^1.1.20",
     "@radix-ui/react-tooltip": "^1.3.0",
+    "fflate": "^0.8.2",
     "jszip": "^3.10.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
