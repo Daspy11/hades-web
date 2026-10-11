@@ -42,6 +42,31 @@ export function modifiersOf(e: { shiftKey: boolean; ctrlKey: boolean; altKey: bo
 }
 
 // ---------------------------------------------------------------------------------------------
+// Event masks (accepted by `Gtk.widgetAddEvents`; the browser delivers all events regardless)
+
+export type EventMask =
+  | "EventMaskPointerMotionMask"
+  | "EventMaskButtonMotionMask"
+  | "EventMaskButton1MotionMask"
+  | "EventMaskButton2MotionMask"
+  | "EventMaskButton3MotionMask"
+  | "EventMaskButtonPressMask"
+  | "EventMaskButtonReleaseMask"
+  | "EventMaskKeyPressMask"
+  | "EventMaskKeyReleaseMask"
+  | "EventMaskScrollMask"
+  | "EventMaskSmoothScrollMask";
+export const EventMaskPointerMotionMask: EventMask = "EventMaskPointerMotionMask";
+export const EventMaskButtonMotionMask: EventMask = "EventMaskButtonMotionMask";
+export const EventMaskButton1MotionMask: EventMask = "EventMaskButton1MotionMask";
+export const EventMaskButtonPressMask: EventMask = "EventMaskButtonPressMask";
+export const EventMaskButtonReleaseMask: EventMask = "EventMaskButtonReleaseMask";
+export const EventMaskKeyPressMask: EventMask = "EventMaskKeyPressMask";
+export const EventMaskKeyReleaseMask: EventMask = "EventMaskKeyReleaseMask";
+export const EventMaskScrollMask: EventMask = "EventMaskScrollMask";
+export const EventMaskSmoothScrollMask: EventMask = "EventMaskSmoothScrollMask";
+
+// ---------------------------------------------------------------------------------------------
 // Events
 
 export type EventType =
@@ -349,6 +374,10 @@ export const CursorTypeArrow: CursorType = "CursorTypeArrow";
 
 export interface Cursor {
   readonly css: string;
+}
+/** `windowGetDisplay`: there is a single display (the document). */
+export function windowGetDisplay(_win: unknown): unknown {
+  return null;
 }
 export function cursorNewForDisplay(_display: unknown, t: CursorType): Cursor {
   const css = t === "CursorTypeWatch" ? "wait" : t === "CursorTypeHand1" ? "pointer" : t === "CursorTypeCrosshair" ? "crosshair" : "default";

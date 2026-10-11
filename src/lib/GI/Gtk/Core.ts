@@ -514,7 +514,10 @@ export function onWidgetDestroy(w: Widget, cb: () => void): SignalHandlerId {
 export function widgetInDestruction(w: Widget): boolean {
   return w.destroyed;
 }
-export function widgetShowAll(_w: Widget): void {}
+/** `widgetShowAll`: widgets are visible by default; a toplevel (window, dialog) is shown. */
+export function widgetShowAll(w: Widget): void {
+  if (isToplevel(w)) widgetShow(w);
+}
 export function widgetShow(w: Widget): void {
   if (!w.visible) {
     w.visible = true;
@@ -715,8 +718,17 @@ export function containerSetBorderWidth(c: Container, n: number): void {
   c.changed();
 }
 export function containerCheckResize(_c: Container): void {}
-export function containerChildSetProperty(c: Container, child: Widget, prop: string, value: unknown): void {
-  if (prop === "expand") child.packing = { ...child.packing, expand: value as boolean };
+export function containerChildSetProperty(c: Container, child: Widget, prop: string, value0: unknown): void {
+  // Accept a GValue (`Gtk.toGValue x`), as gi-gtk does.
+  const value = value0 !== null && typeof value0 === "object" && "value" in value0 ? (value0 as { value: unknown }).value : value0;
+  if (prop === "expand") {
+    child.packing = { ...child.packing, expand: value as boolean };
+    // GtkToolbar's "expand" child property is the tool item's expand flag.
+    if ("expand" in child && typeof (child as { expand: unknown }).expand === "boolean") {
+      (child as unknown as { expand: boolean }).expand = value as boolean;
+      child.changed();
+    }
+  }
   else if (prop === "fill") child.packing = { ...child.packing, fill: value as boolean };
   else if (prop === "padding") child.packing = { ...child.packing, padding: value as number };
   else if (prop === "pack-type") child.packing = { ...child.packing, packType: value as PackType };

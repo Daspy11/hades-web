@@ -1616,10 +1616,21 @@ export function menuToolButtonSetArrowTooltipText(t: MenuToolButton, s: string):
 
 export class SeparatorToolItem extends ToolItem {
   override readonly kind: string = "separatorToolItem";
+  /** False: an invisible spacer (with `expand`, it pushes later items to the far end). */
   draw = true;
+  override setProperty(name: string, value: unknown): void {
+    if (name === "draw") {
+      this.draw = value as boolean;
+      this.changed();
+    } else super.setProperty(name, value);
+  }
 }
 export function separatorToolItemNew(): SeparatorToolItem {
   return new SeparatorToolItem();
+}
+export function separatorToolItemSetDraw(t: SeparatorToolItem, b: boolean): void {
+  t.draw = b;
+  t.changed();
 }
 
 // =============================================================================================

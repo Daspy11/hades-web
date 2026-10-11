@@ -1,0 +1,16 @@
+/*
+ * Style classes used by `widgetLinkColour` (Reactive/Banana/GI/Common.ts). The widget
+ * background is set to the linked colour; the classes make the inner editing element
+ * transparent so that the colour shows, with contrasting text.
+ */
+.hades-transparent-dark,
+.hades-transparent-light {
+  background-image: none;
+}
+.hades-transparent-dark input,
+.hades-transparent-light input,
+.hades-transparent-dark textarea,
+.hades-transparent-light textarea {
+  background: transparent;
+  color: inherit;
+}

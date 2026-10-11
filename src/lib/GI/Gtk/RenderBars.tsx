@@ -170,7 +170,11 @@ function ToolItemView({ it }: { it: Widget }) {
   useWidget(it);
   useActionsVersion();
   if (!it.visible) return null;
-  if (it instanceof W.SeparatorToolItem) return <RToolbar.Separator className="gtk-toolbar-separator" />;
+  if (it instanceof W.SeparatorToolItem) {
+    // `draw: false` is an invisible spacer; with `expand` it fills the free space.
+    if (!it.draw) return <span className="gtk-toolbar-spacer" aria-hidden style={{ flex: it.expand ? "1 1 auto" : "0 0 12px" }} />;
+    return <RToolbar.Separator className="gtk-toolbar-separator" style={it.expand ? { flex: "1 1 auto" } : undefined} />;
+  }
   if (it instanceof W.MenuToolButton) {
     const menu = it.menu;
     return (

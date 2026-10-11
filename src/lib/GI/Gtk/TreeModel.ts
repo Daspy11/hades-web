@@ -352,8 +352,11 @@ export class SeqStore<A> extends TreeModel {
   nColumns(): number {
     return 1;
   }
-  columnValue(node: RowNode): any {
-    return node.data;
+  /** Columns added with `customStoreSetColumn` (column number → row projection). */
+  readonly customColumns = new Map<number, (row: A) => any>();
+  columnValue(node: RowNode, col?: number): any {
+    const f = col === undefined ? undefined : this.customColumns.get(col);
+    return f ? f(node.data as A) : node.data;
   }
   getValue(n: number): A {
     const r = this.rows[n];
@@ -441,8 +444,11 @@ export class ForestStore<A> extends TreeModel {
   nColumns(): number {
     return 1;
   }
-  columnValue(node: RowNode): any {
-    return node.data;
+  /** Columns added with `customStoreSetColumn` (column number → row projection). */
+  readonly customColumns = new Map<number, (row: A) => any>();
+  columnValue(node: RowNode, col?: number): any {
+    const f = col === undefined ? undefined : this.customColumns.get(col);
+    return f ? f(node.data as A) : node.data;
   }
   insertForest(parentPath: TreePath, pos: number, forest: Forest<A>): void {
     const parent = parentPath.indices.length === 0 ? null : this.nodeAt(parentPath);
@@ -526,6 +532,54 @@ export function forestStoreGetValueByIter<A>(s: ForestStore<A>, it: TreeIter): A
 /** `customStoreGetRow`/`treeModelGetRow` for typed stores. */
 export function typedStoreGetRow<A>(_s: TreeModel, it: TreeIter): A {
   return it.node!.data as A;
+}
+export const customStoreGetRow = typedStoreGetRow;
+
+/** `Data.GI.Gtk.ModelView.ColumnAccess`: the GType of a custom store column. */
+export type ColumnAccess = "CAInvalid" | "CAInt" | "CABool" | "CAString" | "CAPixbuf";
+export const CAInvalid: ColumnAccess = "CAInvalid";
+export const CAInt: ColumnAccess = "CAInt";
+export const CABool: ColumnAccess = "CABool";
+export const CAString: ColumnAccess = "CAString";
+export const CAPixbuf: ColumnAccess = "CAPixbuf";
+
+/**
+ * `Data.GI.Gtk.ModelView.ColumnId row ty`: a typed column of a custom store, made of a reader
+ * for the column's GValue, the access type and the column number.
+ */
+export interface ColumnId<Row, Ty> {
+  readonly _0: (g: GValue) => Ty;
+  readonly _1: ColumnAccess;
+  readonly _2: number;
+  readonly _row?: Row;
+}
+export function ColumnId<Row, Ty>(_0: (g: GValue) => Ty, _1: ColumnAccess, _2: number): ColumnId<Row, Ty> {
+  return { _0, _1, _2 };
+}
+export function makeColumnIdInt<Row = any>(n: number): ColumnId<Row, number> {
+  return ColumnId((g: GValue) => fromGValue<number>(g), CAInt, n);
+}
+export function makeColumnIdBool<Row = any>(n: number): ColumnId<Row, boolean> {
+  return ColumnId((g: GValue) => fromGValue<boolean>(g), CABool, n);
+}
+export function makeColumnIdString<Row = any>(n: number): ColumnId<Row, string> {
+  return ColumnId((g: GValue) => fromGValue<string | null>(g) ?? "", CAString, n);
+}
+export function makeColumnIdPixbuf<Row = any>(n: number): ColumnId<Row, unknown> {
+  return ColumnId((g: GValue) => fromGValue<unknown>(g), CAPixbuf, n);
+}
+export function columnIdToNumber<Row, Ty>(c: ColumnId<Row, Ty>): number {
+  return c._2;
+}
+/**
+ * `customStoreSetColumn store colId f`: column `colId` of the typed store shows `f row`
+ * (used by `GtkIconView` text/pixbuf columns, combo `textColumn`s and `treeModelGetValue`).
+ */
+export function customStoreSetColumn<Row, Ty>(
+  s: SeqStore<Row> | ForestStore<Row>, c: ColumnId<Row, Ty>, f: (row: Row) => Ty,
+): void {
+  s.customColumns.set(c._2, f);
+  s.bump();
 }
 
 // ---------------------------------------------------------------------------------------------

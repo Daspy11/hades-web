@@ -2,7 +2,7 @@
  * Combo boxes, icon views, the colour chooser dialog and the native file chooser for the web
  * GTK replacement.
  */
-import { GObject, Widget, registerToplevel, type SignalHandlerId } from "./Core";
+import { GObject, Widget, registerToplevel, type SignalHandlerId, type SelectionMode } from "./Core";
 import { Dialog, dialogAddButton, Window, boxPackStart } from "./Widgets";
 import { TreeModel, TreeIter, RowNode, type TreePath } from "./TreeModel";
 import { CellRenderer, computeCellProps, TreeViewColumn } from "./TreeView";
@@ -127,10 +127,12 @@ export class IconView extends Widget {
   tooltipColumn = -1;
   itemWidth = -1;
   columns = -1;
+  selectionMode: SelectionMode = "SelectionModeSingle";
   selected: RowNode | null = null;
   override setProperty(name: string, value: unknown): void {
     switch (name) {
       case "model": this.model = value as TreeModel; break;
+      case "selectionMode": this.selectionMode = value as SelectionMode; break;
       case "textColumn": this.textColumn = value as number; break;
       case "pixbufColumn": this.pixbufColumn = value as number; break;
       case "markupColumn": this.markupColumn = value as number; break;
