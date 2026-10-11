@@ -2503,6 +2503,7 @@ function renderGadget_ClickableList(wInit: WInit, initial: GD, e: B.Event<GD>, b
     const x1 = Pango.unitsFromDouble(x);
     const y1 = Pango.unitsFromDouble(y);
     const [validIdx, idx] = Pango.layoutXyToIndex(layout, x1, y1);
+    console.log("DEBUG getLabelItem", x, y, validIdx, idx, JSON.stringify(Pango.layoutGetText(layout)), layout.font.css());
     return validIdx ? mapMaybeValue((c: GtkClickable<any>) => c.gclickBase, idxFunc(idx)) : Nothing;
   };
   const evBox = Gtk.new_(Gtk.EventBox, { visibleWindow: true });

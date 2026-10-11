@@ -122,7 +122,10 @@ Data files from the original `share` directories are bundled. Use
 
 * `DrawingArea` emits `draw` with a `Cairo.Context` (`onWidgetDraw(w, (cr) => { ...; return true; })`).
   The context is already scaled for the device pixel ratio. `widgetQueueDraw` schedules a
-  repaint.
+  repaint. Inside a scrolled window the canvas only covers the visible part of the widget (the
+  context is translated to match, like GTK's clipped exposes), so draw in widget coordinates
+  and do not assume the whole widget is painted. Event coordinates are widget coordinates.
+  Window accelerators take priority over the drawing area's `key-press-event`, as in GTK.
 * A `Cairo.Render<A>` is `(cr: Context) => A`, and `Cairo.renderWithContext(r, cr)` runs it.
 * Pango: `Pango.createContext(cr)` (PangoCairo), then `Pango.layoutNew(ctx)`,
   `layoutSetText`, `layoutSetMarkup`, `layoutSetWidth` (in Pango units), `layoutGetExtents`, and

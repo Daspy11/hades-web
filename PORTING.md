@@ -645,3 +645,32 @@ Decisions made while porting that other modules depend on. Read before importing
   multi-shot continuations for dialog Apply. **Dialogs opened from inside a diagram Delta
   (e.g. "Edit properties", "Find in other diagrams") cannot be replayed: the interpreter shows
   them without an Apply button (`disableApply1`).**
+
+### Hades.GI.{MouseMachine,Rendering,Toolbar,Saving} (H2)
+
+* `makeDrawingGtk(cls: Connectable<V>, diagram, ctx, backgroundMenu: Maybe<(p) => Menu<Action<V>>>,
+  keyCommands, style, zoom, hadesB)` returns `[widget, hadesInit, Event<Action<V>[]>]`;
+  `makeGtkDeltaToolbar(cls, toolbar)` returns `[Gtk.Toolbar, Event<Action<V>[]>]`;
+  `makeBottomBar(hintB, scaleB)` returns `[widget, Event<Scale>]`.
+* `hadesActionExecute(base, hades, actions)` is a generator in the base monad's protocol (`base`
+  becomes `d.base`): in a ModelScript `const r = yield* hadesActionExecute(ctx, h, acts)`; with
+  an IO base `runInner(hadesActionExecute(null, h, acts))`. `HadesActionResult` fields as in
+  Haskell; `hadesActionDraw` is a `() => void`.
+* `HadesGtk<V>` fields `_hadesState`, `_hadesViews`, `_hadesTransients`, `hadesCanvas`,
+  `hadesPaint`; lenses `hadesState<V>()`, `hadesViews<V>()`. Zoom etc.:
+  `view(deltaZoom(), streamStateT(view(hadesState(), h)))`.
+* `HadesGtk` values behave immutably like the Haskell continuations: an old value (e.g. the
+  `hadesInit` an editor resets to on refresh, or the initial state of a replayed script) can be
+  executed again; it restarts a Delta machine from its own `DeltaState` snapshot (see
+  `HadesMachine` in Rendering.ts). Only restarting in the middle of a drag loses the drag.
+* `renderStatic(style, hades)` is a `Cairo.Render<void>`; `renderStaticSize(hades)`.
+* Saving: everything is async. `openUserFile(parent | null, filters, fname: Maybe)` →
+  `Promise<Maybe<[path, Uint8Array]>>`; `openJsonFile(codec, parent, filters, fname)`;
+  `saveFile(codec, parent, filters, pathFunc, fname, doc)`, `saveAsFile(...)`,
+  `writeAsFile(codec, parent, title, button, filters, pathFunc, fname, doc)`;
+  `forEditing(parent, oldStatus, async () => Maybe<[path, a]>)`; `catchFileError(parent | null,
+  () => Promise<A>)` → `Promise<Maybe<A>>` (catches `IOError`/`DOMException` only), `catchFileError_`;
+  `tryDecodeXml(bytes)` is synchronous; `ExportType` string enum + `exportTypeValues`.
+* MouseMachine: `MouseCommand` = `{tag: "MouseCommand", mouseType, mouseLocation, mouseModifiers}`
+  | `MouseZoom(d)`; `MouseCommandType` constants `SingleClick`, `DoubleClick`, `RightClick`,
+  constructors `MouseDrag([dx, dy])`, `MouseEndDrag(...)`, `MouseKey(c)`.

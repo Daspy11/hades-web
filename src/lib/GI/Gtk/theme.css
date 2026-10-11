@@ -458,7 +458,7 @@ button, input, textarea, select { font: inherit; color: inherit; }
 }
 .gtk-toolbutton {
   display: inline-flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
   justify-content: center;
   gap: 1px;
@@ -472,6 +472,8 @@ button, input, textarea, select { font: inherit; color: inherit; }
   font-size: 9.5pt;
   user-select: none;
 }
+.gtk-toolbutton[data-style="ToolbarStyleBoth"] { flex-direction: column; gap: 1px; }
+.gtk-toolbutton[data-style="ToolbarStyleBothHoriz"] { gap: 4px; }
 .gtk-toolbutton:hover:not(:disabled) {
   border-color: var(--borders);
   background: linear-gradient(to top, #edebe9 2px, #f6f5f4);
@@ -522,6 +524,9 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .gtk-notebook-tab:focus-visible { outline: 1px dashed rgba(46, 52, 54, 0.35); outline-offset: -4px; }
 .gtk-notebook-tab .gtk-button { min-height: 22px; min-width: 22px; padding: 2px; border-radius: 100%; }
 .gtk-notebook-action { display: flex; align-items: center; padding: 0 3px; }
+.gtk-notebook-tab.drop-before { box-shadow: inset 3px 0 var(--selected-bg); }
+.gtk-notebook-tab.drop-after { box-shadow: inset -3px 0 var(--selected-bg); }
+.gtk-notebook-tabs.drop-target { background: rgba(53, 132, 228, 0.15); min-height: 28px; }
 .gtk-notebook-page { outline: none; }
 
 /* Paned */
@@ -579,7 +584,7 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .gtk-cell-editor { flex: 1 1 auto; display: flex; }
 .gtk-cell-editor .gtk-entry { min-height: 24px; flex: 1 1 auto; }
 .gtk-cell-editor .gtk-entry input { height: 22px; }
-.gtk-cell-combo { min-height: 24px; }
+.gtk-cell-combo { min-height: 24px; color: var(--theme-text); }
 .gtk-expander { flex: 0 0 16px; width: 16px; height: 16px; display: inline-grid; place-items: center; }
 .gtk-expander.collapsed::before, .gtk-expander.expanded::before {
   content: "";

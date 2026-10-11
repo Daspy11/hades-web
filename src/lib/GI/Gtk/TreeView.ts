@@ -335,6 +335,8 @@ export class TreeView extends Widget {
   tooltipColumn = -1;
   activateOnSingleClick = false;
   dragSource = false;
+  /** Drag targets registered with `treeViewEnableModelDragSource` (null: the default target). */
+  dragTargets: string[] | null = null;
   dragDest = false;
   dragDestRow: { path: TreePath; pos: TreeViewDropPosition } | null = null;
   editing: EditingState | null = null;
@@ -596,6 +598,7 @@ export function treeViewSetDragDestRow(v: TreeView, p: TreePath | null, pos: Tre
 }
 export function treeViewEnableModelDragSource(v: TreeView, _mask: unknown, _targets: unknown, _actions: unknown): void {
   v.dragSource = true;
+  if (Array.isArray(_targets) && _targets.length > 0 && _targets.every((t) => typeof t === "string")) v.dragTargets = _targets as string[];
 }
 export function treeViewEnableModelDragDest(v: TreeView, _targets: unknown, _actions: unknown): void {
   v.dragDest = true;

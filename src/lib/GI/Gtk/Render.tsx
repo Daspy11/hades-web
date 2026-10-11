@@ -297,16 +297,50 @@ function BinView({ w, layout }: { w: Bin; layout?: LayoutStyle }) {
 }
 
 function LayoutView({ w, layout }: { w: W.Layout; layout?: LayoutStyle }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  // The layout's own allocation is reported with "size-allocate", as GTK does.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    let last = "";
+    const ro = new ResizeObserver(() => {
+      const r = { x: 0, y: 0, width: el.clientWidth, height: el.clientHeight };
+      const key = `${r.width}x${r.height}`;
+      if (key === last) return;
+      last = key;
+      w.emit("size-allocate", r);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [w]);
+  const props = baseProps(w, "", { position: "relative", ...layout });
   return (
-    <div {...baseProps(w, "", { position: "relative", ...layout })}>
+    <div
+      {...props}
+      ref={(e) => {
+        ref.current = e as HTMLDivElement | null;
+        props.ref(e);
+      }}
+    >
       <div style={{ position: "relative", width: w.width, height: w.height }}>
         {w.children.map((c) => {
           const [x, y] = w.positions.get(c) ?? [0, 0];
-          return <WidgetView key={c.objectId} w={c} layout={{ position: "absolute", left: x, top: y }} />;
+          const size = w.sizes.get(c);
+          const sizeStyle: LayoutStyle = size ? { width: size[0], height: size[1], boxSizing: "border-box" } : {};
+          return <WidgetView key={c.objectId} w={c} layout={{ position: "absolute", left: x, top: y, ...sizeStyle }} />;
         })}
       </div>
     </div>
   );
+}
+
+/**
+ * `gtk_widget_compute_expand`: a widget expands if its expand flag is set, or, when it has not
+ * been set explicitly, if any visible descendant expands.
+ */
+function computeExpand(w: Widget, horizontal: boolean): boolean {
+  if (horizontal ? w.hexpandSet : w.vexpandSet) return horizontal ? w.hexpand : w.vexpand;
+  return w.getChildren().some((c) => c.visible && computeExpand(c, horizontal));
 }
 
 function GridView({ w, layout }: { w: W.Grid; layout?: LayoutStyle }) {
@@ -316,8 +350,8 @@ function GridView({ w, layout }: { w: W.Grid; layout?: LayoutStyle }) {
     const [l, t, wd, ht] = w.placement.get(c) ?? [0, 0, 1, 1];
     cols = Math.max(cols, l + wd);
     rows = Math.max(rows, t + ht);
-    if (c.hexpand) for (let i = l; i < l + wd; i++) hexpandCols.add(i);
-    if (c.vexpand) for (let i = t; i < t + ht; i++) vexpandRows.add(i);
+    if (computeExpand(c, true)) for (let i = l; i < l + wd; i++) hexpandCols.add(i);
+    if (computeExpand(c, false)) for (let i = t; i < t + ht; i++) vexpandRows.add(i);
   }
   const colT = Array.from({ length: cols }, (_, i) => (w.columnHomogeneous ? "1fr" : hexpandCols.has(i) ? "minmax(0, 1fr)" : "auto")).join(" ");
   const rowT = Array.from({ length: rows }, (_, i) => (w.rowHomogeneous ? "1fr" : vexpandRows.has(i) ? "minmax(0, 1fr)" : "auto")).join(" ");
@@ -472,9 +506,76 @@ function PanedView({ w, layout }: { w: W.Paned; layout?: LayoutStyle }) {
   );
 }
 
+/**
+ * The notebook tab being dragged (HTML5 drag and drop). As in GTK, a reorderable tab can be
+ * dragged to another position in its notebook, and a detachable tab can be dragged to another
+ * notebook with the same group name (`notebookSetGroupName`).
+ */
+let tabDrag: { from: W.Notebook; child: Widget } | null = null;
+
+/** Can the tab being dragged be dropped on the notebook? */
+function tabDropAllowed(to: W.Notebook): boolean {
+  if (!tabDrag) return false;
+  const { from, child } = tabDrag;
+  const page = from.pages.find((p) => p.child === child);
+  if (!page) return false;
+  if (from === to) return page.reorderable;
+  if (!page.detachable || from.groupName === null || from.groupName !== to.groupName) return false;
+  // Not into a notebook inside the page being dragged.
+  for (let a: Widget | null = to; a; a = a.parent) if (a === child) return false;
+  return true;
+}
+
 function NotebookView({ w, layout }: { w: W.Notebook; layout?: LayoutStyle }) {
   const cur = w.currentPage;
   const props = baseProps(w, w.showBorder ? "" : "flat", { display: "flex", flexDirection: "column", ...layout });
+  // Tab position where a dragged tab would be dropped (for the drop indicator).
+  const [dropAt, setDropAt] = useState<number | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const dropIndex = (e: React.DragEvent): number => {
+    const tabs = listRef.current ? Array.from(listRef.current.children).filter((el) => el.classList.contains("gtk-notebook-tab")) : [];
+    for (let i = 0; i < tabs.length; i++) {
+      const r = tabs[i].getBoundingClientRect();
+      if (e.clientX < r.left + r.width / 2) return i;
+    }
+    return tabs.length;
+  };
+  const onDragOver = (e: React.DragEvent) => {
+    if (!tabDropAllowed(w)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "move";
+    const i = dropIndex(e);
+    if (i !== dropAt) setDropAt(i);
+  };
+  const onDragLeave = (e: React.DragEvent) => {
+    if (dropAt !== null && !e.currentTarget.contains(e.relatedTarget as Node | null)) setDropAt(null);
+  };
+  const onDrop = (e: React.DragEvent) => {
+    if (!tabDrag || !tabDropAllowed(w)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const { from, child } = tabDrag;
+    tabDrag = null;
+    const i = dropIndex(e);
+    setDropAt(null);
+    if (from === w) {
+      const old = W.notebookPageNum(w, child);
+      const to = i > old ? i - 1 : i;
+      if (to !== old) W.notebookReorderChild(w, child, to);
+    } else W.notebookDoDetachTab(from, w, child, i);
+  };
+  // GTK's "reorder-tab" key bindings: Alt+arrow keys, Alt+Home and Alt+End on a reorderable tab.
+  const onTabKeyDown = (p: W.NotebookPage, i: number, e: React.KeyboardEvent) => {
+    if (!e.altKey || !p.reorderable) return;
+    const n = w.pages.length;
+    const to = e.key === "ArrowLeft" || e.key === "ArrowUp" ? i - 1
+      : e.key === "ArrowRight" || e.key === "ArrowDown" ? i + 1
+        : e.key === "Home" ? 0 : e.key === "End" ? n - 1 : null;
+    if (to === null) return;
+    e.preventDefault();
+    if (to >= 0 && to < n && to !== i) W.notebookReorderChild(w, p.child, to);
+  };
   return (
     <Tabs.Root
       ref={props.ref as any}
@@ -487,15 +588,37 @@ function NotebookView({ w, layout }: { w: W.Notebook; layout?: LayoutStyle }) {
         if (n >= 0) w.switchTo(n);
       }}
       activationMode="manual"
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
     >
       {w.showTabs ? (
         <div className="gtk-notebook-header">
           {w.actionWidgets.start ? <div className="gtk-notebook-action"><WidgetView w={w.actionWidgets.start} /></div> : null}
-          <Tabs.List className={"gtk-notebook-tabs" + (w.scrollable ? " scrollable" : "")} loop>
+          <Tabs.List
+            ref={listRef}
+            className={"gtk-notebook-tabs" + (w.scrollable ? " scrollable" : "") + (dropAt !== null && w.pages.length === 0 ? " drop-target" : "")}
+            loop
+          >
             {w.pages.map((p, i) => (
               <Tabs.Trigger key={p.child.objectId} value={String(p.child.objectId)} asChild>
                 <div
-                  className={"gtk-notebook-tab" + (i === cur ? " active" : "")}
+                  className={"gtk-notebook-tab" + (i === cur ? " active" : "") +
+                    (dropAt === i ? " drop-before" : dropAt === w.pages.length && i === w.pages.length - 1 ? " drop-after" : "")}
+                  draggable={p.detachable || p.reorderable}
+                  aria-keyshortcuts={p.reorderable ? "Alt+ArrowLeft Alt+ArrowRight Alt+Home Alt+End" : undefined}
+                  onDragStart={(e) => {
+                    if (!p.detachable && !p.reorderable) return;
+                    e.stopPropagation();
+                    tabDrag = { from: w, child: p.child };
+                    e.dataTransfer.setData("application/x-gtk-notebook-tab", String(p.child.objectId));
+                    e.dataTransfer.effectAllowed = "move";
+                  }}
+                  onDragEnd={() => {
+                    tabDrag = null;
+                    setDropAt(null);
+                  }}
+                  onKeyDown={(e) => onTabKeyDown(p, i, e)}
                   onMouseDown={(e) => {
                     if (e.button === 1) e.preventDefault();
                   }}
@@ -604,7 +727,9 @@ function LabelView({ w, layout }: { w: W.Label; layout?: LayoutStyle }) {
 function EntryView({ w, layout }: { w: W.Entry; layout?: LayoutStyle }) {
   const el = useRef<HTMLDivElement | null>(null);
   // Padding (16px) and border (2px) plus room for the caret: GTK's width-chars counts text only.
-  const style: LayoutStyle = { ...(w.widthChars > 0 ? { width: `calc(${w.widthChars}ch + 20px)` } : {}), ...layout };
+  // GTK's width-chars is the requested width; an entry that expands horizontally may grow beyond it.
+  const wc = w.widthChars > 0 ? `calc(${w.widthChars}ch + 20px)` : null;
+  const style: LayoutStyle = { ...(wc ? (w.hexpand ? { minWidth: wc } : { width: wc }) : {}), ...layout };
   const props = baseProps(w, w.hasFrame ? "" : "flat", style);
   const icon = (pos: "EntryIconPositionPrimary" | "EntryIconPositionSecondary") => {
     const name = w.icons[pos];
@@ -648,7 +773,7 @@ function EntryView({ w, layout }: { w: W.Entry; layout?: LayoutStyle }) {
         placeholder={w.placeholder}
         maxLength={w.maxLength > 0 ? w.maxLength : undefined}
         spellCheck={w.inputHints.includes("InputHintsSpellcheck")}
-        style={{ textAlign: w.xalign >= 0.75 ? "right" : w.xalign >= 0.25 ? "center" : "left" }}
+        style={{ textAlign: w.xalign >= 0.75 ? "right" : w.xalign >= 0.25 ? "center" : "left", ...(wc && w.hexpand ? { width: 0 } : {}) }}
         onChange={(e) => w.userSetText(e.target.value)}
         onKeyDown={(e) => {
           const kh = keyHandler(w);
@@ -761,9 +886,13 @@ function LinkButtonView({ w, layout }: { w: W.LinkButton; layout?: LayoutStyle }
       href={w.uri}
       target="_blank"
       rel="noopener noreferrer"
-      onClick={() => w.emit("clicked")}
+      onClick={(e) => {
+        if (!w.sensitive) e.preventDefault();
+        else w.emit("clicked");
+      }}
     >
-      {w.label ? (w.useUnderline ? stripMnemonic(w.label) : w.label) : w.uri}
+      {w.image && (w.alwaysShowImage || !w.label) ? <WidgetView w={w.image} /> : null}
+      {w.label ? (w.useUnderline ? stripMnemonic(w.label) : w.label) : w.image ? null : w.uri}
     </a>
   );
 }
@@ -774,14 +903,19 @@ function ImageView({ w, layout }: { w: W.Image; layout?: LayoutStyle }) {
   let width: number | undefined = size, height: number | undefined = size;
   if (w.pixbuf) {
     src = w.pixbuf.url;
-    width = w.pixbuf.width > 0 ? w.pixbuf.width : undefined;
-    height = w.pixbuf.height > 0 ? w.pixbuf.height : undefined;
+    // An explicit pixel size also applies to pixbufs (as in GTK 4).
+    width = w.pixelSize > 0 ? w.pixelSize : w.pixbuf.width > 0 ? w.pixbuf.width : undefined;
+    height = w.pixelSize > 0 ? w.pixelSize : w.pixbuf.height > 0 ? w.pixbuf.height : undefined;
   } else if (w.file) {
     src = w.file;
     width = undefined;
     height = undefined;
   } else src = iconUrl(w.iconName, size);
-  const props = baseProps(w, "", { width, height, ...layout });
+  // GTK draws an image centred in its allocation, so a stretched image is centred instead.
+  const centred: LayoutStyle | undefined = layout && (layout.alignSelf === "stretch" || layout.justifySelf === "stretch")
+    ? { ...layout, ...(layout.alignSelf === "stretch" ? { alignSelf: "center" } : {}), ...(layout.justifySelf === "stretch" ? { justifySelf: "center" } : {}) }
+    : layout;
+  const props = baseProps(w, "", { width, height, ...centred });
   const el = useRef<HTMLElement | null>(null);
   if (!src) return <span {...props} />;
   return (
@@ -803,8 +937,16 @@ function ImageView({ w, layout }: { w: W.Image; layout?: LayoutStyle }) {
 
 function TextViewView({ w, layout }: { w: W.TextView; layout?: LayoutStyle }) {
   const props = baseProps(w, "", { display: "flex", ...layout });
+  const el = useRef<HTMLElement | null>(null);
   return (
-    <div {...props}>
+    <div
+      {...props}
+      ref={(e) => {
+        el.current = e;
+        props.ref(e);
+      }}
+      {...buttonEventHandlers(w, () => el.current)}
+    >
       <textarea
         value={w.buffer.text}
         readOnly={!w.editable}

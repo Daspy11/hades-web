@@ -73,12 +73,19 @@ function CellEditorView({ v, entry }: { v: TreeView; entry: Widget }) {
   useEffect(() => {
     const el = ref.current;
     const tv = v.el;
+    // As in GTK, the editable takes the focus with its text selected.
+    const input = el?.querySelector<HTMLInputElement>("input, textarea");
+    if (input) {
+      input.focus();
+      input.select();
+    }
     if (!el || !tv || !entry.hasHandlers("size-allocate")) return;
     const r = el.getBoundingClientRect(), t = tv.getBoundingClientRect();
     const [x, y] = treeViewConvertWidgetToBinWindowCoords(v, r.left - t.left, r.top - t.top);
     entry.emit("size-allocate", { x, y, width: r.width, height: r.height });
   }, [v, entry]);
-  return <span className="gtk-cell-editor" ref={ref}><WidgetView w={entry} /></span>;
+  // Keys typed into the editor (Enter, arrows) are not tree view navigation.
+  return <span className="gtk-cell-editor" ref={ref} onKeyDown={(e) => e.stopPropagation()}><WidgetView w={entry} /></span>;
 }
 
 function CellView({ v, col, cell, props, path, node, selected }: {
@@ -243,7 +250,14 @@ export function TreeViewView({ w, layout }: { w: TreeView; layout?: LayoutStyle 
     w.startEditing(row.path, col, pc.cell, String(props.text ?? ""));
   };
 
+  /**
+   * React events from portals (a cell's combo popup) bubble to the row, as do clicks in a cell's
+   * editor (e.g. on an entry icon); they are not row clicks.
+   */
+  const fromPortal = (e: React.SyntheticEvent): boolean =>
+    !ref.current?.contains(e.target as Node) || !!(e.target as HTMLElement).closest?.(".gtk-cell-editor");
   const onRowMouseDown = (row: VisibleRow, e: React.MouseEvent) => {
+    if (fromPortal(e)) return;
     if (w.editing) w.stopEditing(false);
     const handled = w.emit("button-press-event", evButton(e, e.detail === 2 ? "EventType2buttonPress" : "EventTypeButtonPress"));
     if (handled === true) {
@@ -266,6 +280,7 @@ export function TreeViewView({ w, layout }: { w: TreeView; layout?: LayoutStyle 
   };
 
   const onRowDoubleClick = (row: VisibleRow, e: React.MouseEvent) => {
+    if (fromPortal(e)) return;
     if (editTimer.current) {
       window.clearTimeout(editTimer.current);
       editTimer.current = null;
@@ -343,7 +358,7 @@ export function TreeViewView({ w, layout }: { w: TreeView; layout?: LayoutStyle 
     if (!w.dragSource && !w.reorderable) return;
     if (!sel.selected.has(w.keyOf(row.node))) selectRow(row, { ctrlKey: false, metaKey: false, shiftKey: false });
     const paths = rows.filter((r) => sel.selected.has(w.keyOf(r.node))).map((r) => r.path);
-    const ctx = new DragContext(["hades/entity"], e.nativeEvent);
+    const ctx = new DragContext(w.dragTargets ?? ["hades/entity"], e.nativeEvent);
     dragState = { view: w, paths, ctx };
     e.dataTransfer.setData("text/plain", paths.map((p) => p.toString()).join(";"));
     e.dataTransfer.effectAllowed = "copyMove";

@@ -1205,28 +1205,35 @@ export function notebookAppendPage(nb: Notebook, child: Widget, tabLabel: Widget
   return notebookAppendPageMenu(nb, child, tabLabel, null);
 }
 export function notebookAppendPageMenu(nb: Notebook, child: Widget, tabLabel: Widget | null, menuLabel: Widget | null): number {
+  return notebookInsertPageMenu(nb, child, tabLabel, menuLabel, -1);
+}
+export function notebookInsertPage(nb: Notebook, child: Widget, tabLabel: Widget | null, pos: number): number {
+  return notebookInsertPageMenu(nb, child, tabLabel, null, pos);
+}
+/**
+ * Insert a page at `pos` (`-1` or past the end appends). Emits "page-added" and, if the notebook
+ * was empty, "switch-page". Returns the index of the new page.
+ */
+export function notebookInsertPageMenu(
+  nb: Notebook, child: Widget, tabLabel: Widget | null, menuLabel: Widget | null, pos: number,
+): number {
   if (child.parent) child.parent.removeChild(child);
   child.parent = nb;
   if (tabLabel) {
     if (tabLabel.parent) tabLabel.parent.removeChild(tabLabel);
     tabLabel.parent = nb;
   }
-  nb.pages.push({ child, tabLabel, menuLabel, detachable: false, reorderable: false });
-  const n = nb.pages.length - 1;
+  const n = pos < 0 || pos > nb.pages.length ? nb.pages.length : pos;
+  const cur = nb.pages[nb.currentPage]?.child ?? null;
+  nb.pages.splice(n, 0, { child, tabLabel, menuLabel, detachable: false, reorderable: false });
+  if (cur) nb.currentPage = nb.pages.findIndex((pg) => pg.child === cur);
+  nb.emit("page-added", child, n);
   if (nb.currentPage < 0) {
     nb.currentPage = n;
     nb.emit("switch-page", child, n);
   }
   nb.changed();
   return n;
-}
-export function notebookInsertPage(nb: Notebook, child: Widget, tabLabel: Widget | null, pos: number): number {
-  const n = notebookAppendPage(nb, child, tabLabel);
-  if (pos < 0 || pos >= n) return n;
-  const [p] = nb.pages.splice(n, 1);
-  nb.pages.splice(pos, 0, p);
-  nb.changed();
-  return pos;
 }
 export function notebookRemovePage(nb: Notebook, n: number): void {
   if (n < 0) n = nb.pages.length - 1;
@@ -1288,9 +1295,50 @@ export const setNotebookEnablePopup = (nb: Notebook, b: boolean): void => {
 export function notebookSetGroupName(nb: Notebook, n: string | null): void {
   nb.groupName = n;
 }
+export function notebookGetGroupName(nb: Notebook): string | null {
+  return nb.groupName;
+}
+/**
+ * A detachable tab can be dragged to another notebook with the same group name
+ * (`notebookSetGroupName`). The renderer uses HTML5 drag and drop on the tabs.
+ */
 export function notebookSetTabDetachable(nb: Notebook, w: Widget, b: boolean): void {
   const p = nb.pages.find((pg) => pg.child === w);
-  if (p) p.detachable = b;
+  if (p) {
+    p.detachable = b;
+    nb.changed();
+  }
+}
+export function notebookGetTabDetachable(nb: Notebook, w: Widget): boolean {
+  return nb.pages.find((pg) => pg.child === w)?.detachable ?? false;
+}
+export function notebookGetTabReorderable(nb: Notebook, w: Widget): boolean {
+  return nb.pages.find((pg) => pg.child === w)?.reorderable ?? false;
+}
+/** Remove the page of `child` from the notebook (`gtk_notebook_detach_tab`). */
+export function notebookDetachTab(nb: Notebook, child: Widget): void {
+  const n = notebookPageNum(nb, child);
+  if (n >= 0) notebookRemovePage(nb, n);
+}
+/**
+ * Not GTK API: what GTK does when a detachable tab of `from` is dropped on `to` (a notebook in
+ * the same group) at tab position `pos`: the page moves with its tab and menu labels and its
+ * reorderable/detachable flags, and becomes the current page of `to`. Signals: "page-removed"
+ * (and possibly "switch-page") on `from`, then "page-added" and "switch-page" on `to`. Returns
+ * the page index in `to`. Used by the notebook renderer.
+ */
+export function notebookDoDetachTab(from: Notebook, to: Notebook, child: Widget, pos: number): number {
+  const page = from.pages.find((pg) => pg.child === child);
+  if (!page) return -1;
+  const { tabLabel, menuLabel, reorderable, detachable } = page;
+  notebookDetachTab(from, child);
+  const n = notebookInsertPageMenu(to, child, tabLabel, menuLabel, pos);
+  const p2 = to.pages[n];
+  p2.reorderable = reorderable;
+  p2.detachable = detachable;
+  notebookSetCurrentPage(to, n);
+  to.changed();
+  return n;
 }
 export function notebookSetTabReorderable(nb: Notebook, w: Widget, b: boolean): void {
   const p = nb.pages.find((pg) => pg.child === w);
@@ -1331,6 +1379,9 @@ export function onNotebookPageRemoved(nb: Notebook, cb: (page: Widget, n: number
 }
 export function onNotebookPageReordered(nb: Notebook, cb: (page: Widget, n: number) => void): SignalHandlerId {
   return nb.connect("page-reordered", cb);
+}
+export function onNotebookPageAdded(nb: Notebook, cb: (page: Widget, n: number) => void): SignalHandlerId {
+  return nb.connect("page-added", cb);
 }
 
 // =============================================================================================
@@ -1573,12 +1624,29 @@ export function menuBarNew(): MenuBar {
 // =============================================================================================
 // Toolbar
 
+/** `GtkToolbarStyle`. GTK3's default is `ToolbarStyleBothHoriz`: icons only, except for items
+ * marked important, which also show their label beside the icon. */
+export type ToolbarStyle = "ToolbarStyleIcons" | "ToolbarStyleText" | "ToolbarStyleBoth" | "ToolbarStyleBothHoriz";
 export class Toolbar extends Container {
   override readonly kind: string = "toolbar";
   orientation: Orientation = "OrientationHorizontal";
+  toolbarStyle: ToolbarStyle = "ToolbarStyleBothHoriz";
+  override setProperty(name: string, value: unknown): void {
+    if (name === "toolbarStyle") {
+      this.toolbarStyle = value as ToolbarStyle;
+      this.changed();
+    } else super.setProperty(name, value);
+  }
 }
 export function toolbarNew(): Toolbar {
   return new Toolbar();
+}
+export function toolbarSetStyle(t: Toolbar, style: ToolbarStyle): void {
+  t.toolbarStyle = style;
+  t.changed();
+}
+export function toolbarUnsetStyle(t: Toolbar): void {
+  toolbarSetStyle(t, "ToolbarStyleBothHoriz");
 }
 export function toolbarInsert(t: Toolbar, item: Widget, pos: number): void {
   t.add(item);
@@ -1591,6 +1659,17 @@ export function toolbarInsert(t: Toolbar, item: Widget, pos: number): void {
 export class ToolItem extends Bin {
   override readonly kind: string = "toolItem";
   expand = false;
+  isImportant = false;
+  override setProperty(name: string, value: unknown): void {
+    if (name === "isImportant") {
+      this.isImportant = value as boolean;
+      this.changed();
+    } else super.setProperty(name, value);
+  }
+}
+export function toolItemSetIsImportant(t: ToolItem, b: boolean): void {
+  t.isImportant = b;
+  t.changed();
 }
 export function toolItemNew(): ToolItem {
   return new ToolItem();

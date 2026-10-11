@@ -155,13 +155,25 @@ export function PopupMenuView({ m }: { m: W.Menu }) {
 // ---------------------------------------------------------------------------------------------
 // Toolbar
 
+/** The toolbar style in effect for a tool item (its parent toolbar's). */
+function styleOf(t: Widget): W.ToolbarStyle {
+  const p = t.parent;
+  return p instanceof W.Toolbar ? p.toolbarStyle : "ToolbarStyleBothHoriz";
+}
+
 function ToolButtonInner({ t, size }: { t: W.ToolButton; size: number }) {
+  const style = styleOf(t);
   const icon = t.iconWidget ? null : iconUrl(t.iconName, size);
+  const hasIcon = !!t.iconWidget || !!icon;
   const label = t.label ? (t.useUnderline ? stripMnemonic(t.label) : t.label) : "";
+  // GTK shows labels according to the toolbar style; a button without an icon always shows its label.
+  const showIcon = style !== "ToolbarStyleText" || !label;
+  const showLabel =
+    !!label && (!hasIcon || style === "ToolbarStyleText" || style === "ToolbarStyleBoth" || (style === "ToolbarStyleBothHoriz" && t.isImportant));
   return (
     <>
-      {t.iconWidget ? <WidgetView w={t.iconWidget} /> : icon ? <img src={icon} width={size} height={size} alt="" draggable={false} /> : null}
-      {label ? <span className="gtk-toolbutton-label">{label}</span> : null}
+      {showIcon ? (t.iconWidget ? <WidgetView w={t.iconWidget} /> : icon ? <img src={icon} width={size} height={size} alt="" draggable={false} /> : null) : null}
+      {showLabel ? <span className="gtk-toolbutton-label">{label}</span> : null}
     </>
   );
 }
@@ -179,7 +191,7 @@ function ToolItemView({ it }: { it: Widget }) {
     const menu = it.menu;
     return (
       <span className="gtk-menutoolbutton" title={it.tooltip ?? undefined}>
-        <RToolbar.Button className="gtk-toolbutton" disabled={!itemEnabled(it)} onClick={() => it.click()} aria-label={it.label ? stripMnemonic(it.label) : undefined}>
+        <RToolbar.Button className="gtk-toolbutton" disabled={!itemEnabled(it)} onClick={() => it.click()} aria-label={it.label ? stripMnemonic(it.label) : undefined} title={it.tooltip ? undefined : it.label ? stripMnemonic(it.label) : undefined} data-style={styleOf(it)}>
           <ToolButtonInner t={it} size={24} />
         </RToolbar.Button>
         <Dropdown.Root modal={false}>
@@ -204,8 +216,9 @@ function ToolItemView({ it }: { it: Widget }) {
       <RToolbar.Button
         className="gtk-toolbutton"
         disabled={!itemEnabled(it)}
-        title={it.tooltip ?? undefined}
+        title={it.tooltip ?? (it.label ? stripMnemonic(it.label) : undefined)}
         aria-label={it.label ? stripMnemonic(it.label) : it.tooltip ?? undefined}
+        data-style={styleOf(it)}
         onClick={() => it.click()}
       >
         <ToolButtonInner t={it} size={24} />
