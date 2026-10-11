@@ -581,3 +581,14 @@ Decisions made while porting that other modules depend on. Read before importing
   `delete` is `delete_`. ModelEdit functions returning `()` return `void`.
 * `src/hades/test/Test/GI/PackageTree.test.ts` has a `describe.skip` block for the GTK half; enable
   it when `Model/GI/PackageTree.ts` is ported.
+
+### Model.Lookups.Base (M2)
+
+* `HasLookups<V>` dictionary with `_LookupTable: Prism<V, LookupTable>`; constrained functions take
+  `cls: EntityClass<V> & HasLookups<V>` first: `tableFunctions(cls)`, `lookupEditGadget(cls)`,
+  `lookupForest(cls, model)`; `runLookup(tbl, values)`, `goodAxis(f)`, `maxAxisRange`.
+* `LookupTable` record, `_tableValues: M.Map<readonly [ExtValue, ExtValue], ExtValue>`;
+  `eq_/show_/def_/JSON_/Reflective_LookupTable`; lenses `tableName`, `horizontalAxis`,
+  `verticalAxis`, `tableOutput`, `tableValues` are constants.
+* AutoMonad: `catchAutoT` handlers are lexically scoped (try/catch), unlike the Haskell CPS
+  version where the handler stays installed after the protected block; unobservable in HADES.

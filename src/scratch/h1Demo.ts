@@ -137,7 +137,7 @@ export function main(): void {
       ["open", openArrowHead(60, 12)],
       ["circle", circleArrowHead(8, false)],
       ["multi ->>", multiArrowHead(0.8, [closedArrowHead(45, 10, true), closedArrowHead(45, 10, true)])],
-      ["multi ->o", multiArrowHead(1, [circleArrowHead(8, true), openArrowHead(60, 10)])],
+      ["multi ->o", multiArrowHead(1, [closedArrowHead(45, 10, false), circleArrowHead(8, false)])],
     ];
     heads.forEach(([name, h], i) => {
       const y = 300 + i * 34;
