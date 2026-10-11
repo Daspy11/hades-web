@@ -22,9 +22,18 @@ async function loadFonts(): Promise<void> {
   }
 }
 
-const demo = new URLSearchParams(location.search).get("toolkit-demo") !== null;
+// Development entry points: `?demo=<name>` runs `src/scratch/<name>Demo.ts` instead of the app.
+const scratchDemos = import.meta.glob<{ main(): void }>("./scratch/*Demo.ts");
+const params = new URLSearchParams(location.search);
+const demo = params.get("demo") ?? (params.get("toolkit-demo") !== null ? "toolkit" : null);
+// The demo programs of the original repository: `?demo-arrow` and `?demo-webit`.
+const packageDemos = import.meta.glob<{ main(): void }>("./banana-ui/*/demo-*/Main.ts");
+const packageDemo = ["demo-arrow", "demo-webit"].find((d) => params.has(d));
+const loader =
+  (demo !== null && scratchDemos[`./scratch/${demo}Demo.ts`]) ||
+  (packageDemo !== undefined && Object.entries(packageDemos).find(([k]) => k.includes(`/${packageDemo}/`))?.[1]);
 loadFonts()
-  .then(() => (demo ? import("./scratch/toolkitDemo") : import("./dsm/Main")))
+  .then(() => (loader ? loader() : import("./dsm/Main")))
   .then((m) => m.main())
   .catch((err) => {
     console.error(err);

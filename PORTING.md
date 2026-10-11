@@ -409,11 +409,41 @@ scope). Keep the original `proc` block in a comment above the desugared code.
 ## 10. GTK, Cairo and Pango
 
 The `GI.*` libraries are replaced by a web toolkit in `src/lib/GI/` (React + Radix primitives
-rendered from retained widget objects). Its API is documented in `src/lib/GI/Gtk/README.md` and
-`src/lib/GI/Cairo.ts` / `Pango.ts`. GTK-specific modules (`Reactive.Banana.GI.*`, `Hades.GI.*`,
-`Model.GI.*`, `App.*`) are ported against that toolkit; prefer browser-native behaviour (history,
-file pickers, downloads, keyboard shortcuts) where the desktop original used native facilities.
-These rules are added in a later wave.
+rendered from retained widget objects). **Read `src/lib/GI/Gtk/README.md` before porting any
+module that imports `GI.*`.** Summary of the rules:
+
+| Haskell | TypeScript |
+|---|---|
+| `import qualified GI.Gtk as Gtk` (also `Data.GI.Gtk as MV`) | `import * as Gtk from "@/lib/GI/Gtk"` (`MV.` functions also live in `Gtk`) |
+| `GI.Gdk`, `GI.GdkPixbuf` | `import * as Gdk from "@/lib/GI/Gdk"` |
+| `GI.Gio` | `import * as Gio from "@/lib/GI/Gio"` |
+| `GI.Cairo.Render` (+ `.Connector`, `GI.Cairo`) | `import * as Cairo from "@/lib/GI/Cairo"` |
+| `GI.Pango`, `GI.PangoCairo` | `import * as Pango from "@/lib/GI/Pango"` |
+| `Gtk.new Gtk.X [#a := v]` / `Gtk.set w [#a := v]` / `Gtk.get w #a` | `Gtk.new_(Gtk.X, { a: v })` / `Gtk.set(w, { a: v })` / `w.a` (or the `xGetA` function) |
+| `Gtk.on w #sig f` / `Gtk.after w #sig f` | the named `Gtk.onXSig` / `Gtk.afterXSig` function, or `w.connect("sig", f[, true])` |
+| `Maybe w` widget argument | `w \| null` |
+| `Gtk.dialogRun d`, `Gtk.nativeDialogRun f` | `await Gtk.dialogRun(d)` → `number`; the enclosing IO function becomes `async` |
+| file paths | virtual paths, `async` I/O from `@/lib/System/IO` (README "Files") |
+
+* **Blocking I/O becomes async; MomentIO stays synchronous.** An `IO` action that waits for the
+  user (dialog run, file read/write, file chooser) returns a `Promise`, and so do its callers
+  in IO. A `MomentIO` computation cannot await: where the Haskell runs blocking IO inside
+  `MomentIO` (or `liftIO` in network construction), create an event with `B.newEvent()`, start the
+  async action, and fire the event from its `.then`; or move the call into a `reactimate`
+  handler (handlers may be `async`; their Promise is ignored, so catch errors and show them
+  with `errorBox`). Document every such restructuring in a comment beginning `// Web:`.
+* `unsafePerformIO` around a dialog (e.g. `cannotHappen`) shows the dialog without waiting
+  (`void errorBox(...)`) and returns the value.
+* Event signal handlers must stay synchronous (they return the "stop propagation" boolean).
+* CSS: the GTK CSS shipped with the original (`banana-gtk.css`, `hades-gtk.css`) is already in
+  `src/lib/GI/Gtk/theme.css`; `cssProviderLoadFromPath` is a no-op. Style classes added with
+  `styleContextAddClass` map to the same CSS class names. If a module needs styling that is not
+  there, put it in a `.css` file next to the module and `import "./X.css"`.
+* Icons: icon names resolve through `Gtk.iconThemeGetDefault()` / `Gtk.iconUrl` (Adwaita
+  symbolic + the bundled `hicolor`/Diametric themes from `share/`).
+* Prefer browser-native behaviour where the desktop original used native facilities (README
+  "Windows, actions and menus": history, pickers, downloads, keyboard shortcuts, `beforeunload`
+  via `Gtk.windowSetUnloadGuard`). Mark each such deviation with a `// Web:` comment.
 
 ## 11. Quality bar
 
