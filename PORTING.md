@@ -610,3 +610,38 @@ Decisions made while porting that other modules depend on. Read before importing
 * Pixbufs and SVGs draw nothing until loaded; widgets showing them must repaint on
   `Gdk.onImagesLoaded` (Rendering does). `Pango.fallbackMeasurer` is used when no canvas exists
   (jsdom tests).
+
+### Model.Abstract.DiagramType (M1)
+
+* Calling convention: dictionary (if not already in a context) first, then the context
+  (`ModelEditCtx` or `DeltaCtx`), then the Haskell arguments: `openDiagram(cls, ctx, mId)`,
+  `clonePackage(cls, ctx, metaUpdate, ent, name)`, `diagramEntityMenu(cls, mId)`,
+  `avatarShapeMenu(cls, dId[, pt])`. `EntityClass` comes from `ctx.cls` or, inside a Delta,
+  `d.base.cls`. Pure exception: `entityMenu(cls, ent)`.
+* `DiagramEntity<D, DM = any>` (`_diagramEntityName/_Contents/_Data`, lenses as zero-arg functions,
+  `eq_DiagramEntity`); `DiagramMetadataClass<DM>` dictionary (`diagramMetadataJ`,
+  `diagramMetadataMempty`, `diagramMetadataAppend`); `Reflective_DiagramEntity(cls)`,
+  `JSON_DiagramEntity(cls, itemCodec)` with `cls: Viewable<D> & DiagramMetadataClass<DM>`.
+* `HasDiagrams<P, V, PM>` extends `EntityClass`: `isDiagram(v)`, `getDiagramWrapper(ctx, e)`,
+  `diagramEntityTypes`, `diagramMapAvatars(f, e)`.
+* `Avatar<P, V, W, D, DM>` extends `Connectable<D>`: `updateViewContext(ctx, meta, vc)`,
+  `*getDiagramModelId(d)`, `*entityAvatar(d, e, pt)`, `ascendedId(v)`, `*avatarChildren(d, v)`,
+  `*updateAvatar(d, v)`. It must be the same object as the `cls` given to `startDelta`.
+  `scriptContext(d)` returns `d.base` as a `ModelEditCtx`. **`d.base` is re-pointed for each input
+  action: re-read it after every `yieldViews`; never cache it.**
+* `Editable<P, V>`: `editableActivation`, `editableTreeMenu`, `editableDisplayMenu`;
+  `ActivationScript`, `EntityMenu` types.
+* Scripts: `UserScript = ModelScript = Generator<UserScriptFunctor, A, any>`; instructions
+  `ScriptProperties(uuid)`, `ScriptDialog(sel, v)`, `ScriptOpenDiagram(wrapper)`,
+  `ScriptGetSelection`, `ScriptSetSelection(s)`, `ScriptGetHint`, `ScriptSetHint(h)`,
+  `ScriptPerformIO(thunk)` (thunk may return a Promise). `ScriptMonad`-constrained functions take
+  the script ctx first and are used with `yield*` (in Deltas pass `d.base`): `openProperties`,
+  `openDialog`, `openEditor`, `performIO`, `get/setModelSelection`, `withHint(ctx, txt, gen)`, ...
+  `ScriptMonad_UserScript`, `ScriptMonad_Delta`. `promoteScript(prsm, act)`,
+  `withBaseScript(act)`; `keyCommands<D>()`, `packageNameDialog()`, `diagramNameDialog()`.
+* `EntityWrapper<P, V>`: `DiagramWrapper(diagramClass, ...)`, `ViewWrapper(...)`, `sameEntityView`.
+* `stepScript(ctx, script)` → `{tag:"Pure", _0}` | `{tag:"Free", _0: instr, _1: next}`; `next(r)`
+  may be called many times in any state (live first, replay afterwards) — this provides the
+  multi-shot continuations for dialog Apply. **Dialogs opened from inside a diagram Delta
+  (e.g. "Edit properties", "Find in other diagrams") cannot be replayed: the interpreter shows
+  them without an Apply button (`disableApply1`).**

@@ -5,9 +5,9 @@
  * TypeScript port
  * ---------------
  * * `MonadIO m` and `MomentIO` actions are synchronous functions.
- * * A Haskell `Maybe` of a GTK object (`Maybe Gtk.Window`, `Maybe Gdk.Pixbuf`, the `Maybe w`
- *   widget argument of `plainChanges`) is `X | null`, as in the toolkit. Other `Maybe`s
- *   (`Maybe Colour`) are explicit `Maybe` values.
+ * * The `Maybe Gtk.Window` result of `widgetWindow` (a toolkit cast) and the `Maybe w` widget
+ *   argument of `plainChanges` are `X | null`, as in the toolkit. Other `Maybe`s (the
+ *   `Maybe Gdk.Pixbuf` of `safeLoadIcon`, `Maybe Colour`) are explicit `Maybe` values.
  * * `iconDialog` builds its own event network, as in the Haskell (`mdo`: the network is
  *   referenced from inside its own definition to pause it).
  * * `withWaitCursor` also accepts an action returning a Promise; the cursor is restored when it
@@ -110,17 +110,22 @@ export function IconData(iconName: T.Text, iconPixbuf: Gdk.Pixbuf): IconData {
  *
  * "Gtk.iconThemeLoadIcon" throws an error instead of returning "Nothing", so this checks first.
  */
-export function safeLoadIcon(theme: Gtk.IconTheme, name: T.Text, sz: number): Gdk.Pixbuf | null {
-  const failIcon = (): Gdk.Pixbuf | null => {
+export function safeLoadIcon(theme: Gtk.IconTheme, name: T.Text, sz: number): Maybe<Gdk.Pixbuf> {
+  const failIcon = (): Maybe<Gdk.Pixbuf> => {
     const i = Gtk.imageNewFromIconName(null, Gtk.IconSizeButton);
-    return Gtk.imageGetPixbuf(i);
+    return fromNullable(Gtk.imageGetPixbuf(i));
   };
   if (Gtk.iconThemeHasIcon(theme, name)) {
-    const icon1 = loadIconOrNull(theme, name, sz, []);
+    const icon1 = fromNullable(loadIconOrNull(theme, name, sz, []));
     const f = failIcon();
-    return icon1 ?? f;
+    return icon1.tag === "Just" ? icon1 : f; // icon1 <|> f
   }
   return failIcon();
+}
+
+/** A nullable toolkit result as a `Maybe`. */
+function fromNullable<A>(x: A | null): Maybe<A> {
+  return x === null ? Nothing : Just(x);
 }
 
 /** `Gtk.iconThemeLoadIcon` with gi-gtk's nullable result (the toolkit version throws). */

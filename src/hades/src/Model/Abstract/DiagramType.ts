@@ -40,6 +40,11 @@
  *   `withHint txt yieldViews` is `yield* withHint(d.base, txt, yieldViews(d))`. The class itself
  *   is the `ScriptMonad<Ctx>` interface with instances `ScriptMonad_UserScript` and
  *   `ScriptMonad_Delta`.
+ * * **`d.base` changes between input actions.** The diagram editor applies each input action in a
+ *   new script, and `applyDelta` points `d.base` at that script's context. Delta code must
+ *   therefore read `d.base` again after every `yieldViews` (or other wait for the next action)
+ *   instead of keeping it in a variable (see "newBoxAvatarTool"). Script instructions yielded
+ *   within one action do not change it.
  * * **Classes.** `HasDiagrams p v` is the dictionary `HasDiagrams<P, V>`, which extends
  *   `EntityClass<V>`; `Editable p v` is `Editable<P, V>`. Functions with these constraints take
  *   the dictionary as their *first* argument, before any `ModelEditCtx`/`DeltaCtx`
@@ -510,6 +515,10 @@ export function avatar<P = any, V = any, W = any, D = any>(d: DeltaCtx<D>): Avat
 /**
  * TypeScript: the `ModelEditCtx` of the "ModelScript" in which a Delta computation runs
  * (`d.base`, the context of `liftBase`).
+ *
+ * Each input action is applied to the diagram by a new script (`applyDelta` sets `d.base`), so
+ * the context must be read again after every `yieldViews` (or anything else that waits for the
+ * next action): never keep it in a variable across one.
  */
 export function scriptContext<V = any, W = any>(d: DeltaCtx<any>): ModelEditCtx<V, W> {
   return d.base as ModelEditCtx<V, W>;
@@ -688,8 +697,9 @@ export function* updateDiagram<P, V, W, D>(d: DeltaCtx<D>, dTrav: Traversal<W, D
   const r = rs.some((x) => x);
   if (r) {
     const dg = use(d, deltaDiagram<D>());
-    goToEntity(base, uuid);
-    modifyValue(base, (w: W) => set(dTrav.dot(diagramEntityContents<D>()), dg, w));
+    const base1 = scriptContext<V, W>(d);
+    goToEntity(base1, uuid);
+    modifyValue(base1, (w: W) => set(dTrav.dot(diagramEntityContents<D>()), dg, w));
     yield* tellCheckpoint(d, ""); // Flag value for update but no checkpoint.
   }
 }
@@ -1460,9 +1470,9 @@ export function* newBoxAvatarTool<P, V, W, D>(
   /** The item to add. */
   newItem: V,
 ): Delta<D, Action<D>> {
-  const base = scriptContext<V, W>(d);
   const drawShape = (p1: Point, p2: Point): Paint => drawFunc(mkBoundBox(p1, p2));
   const addShape = function* (p1: Point, p2: Point): Delta<D, void> {
+    const base = scriptContext<V, W>(d);
     const newEnt = yield* insertEntity<P, V, W>(base, newItem, parent);
     if (newEnt.tag === "Nothing") return; // Cancel pressed in properties dialog.
     const [newName, modelId] = newEnt.value;
@@ -1471,7 +1481,8 @@ export function* newBoxAvatarTool<P, V, W, D>(
       yield* tellCheckpoint(d, "Add " + view(nameText, newName) + " to diagram");
     })());
   };
-  const c1 = yield* withHint<P, V, W, any, Action<D>>(base, "Click and drag to define the new shape.", yieldViews(d));
+  const c1 = yield* withHint<P, V, W, any, Action<D>>(
+    scriptContext<V, W>(d), "Click and drag to define the new shape.", yieldViews(d));
   // getCorners, as a loop.
   let act = c1;
   for (;;) {
@@ -1509,11 +1520,11 @@ export function* newArrowAvatarTool<P, V, W, D>(
    */
   modelUpdateFunc: (d: DeltaCtx<D>, v: D) => Delta<D, void>,
 ): Delta<D, Action<D>> {
-  const base = scriptContext<V, W>(d);
-  goToEntity(base, parent);
+  goToEntity(scriptContext<V, W>(d), parent);
   const [mShape, action] = yield* getArrowPoints<P, V, W, D>(d, (dId, s) => avatarFunc(U.nil, dId, s));
   if (mShape.tag === "Just") {
     const shape = mShape.value;
+    const base = scriptContext<V, W>(d); // Read again after the input actions (see `scriptContext`).
     goToEntity(base, parent);
     const ent = mkEntity(base, newModelItem);
     const newArrow = yield* addItem(d, (u) => avatarFunc(ent.entityId, u, shape));
@@ -1530,7 +1541,6 @@ function* getArrowPoints<P, V, W, D>(
   /** Transient diagram element for drag animation. */
   arrowFunc: (dId: DiagramId, s: LineShape) => D,
 ): Delta<D, [Maybe<LineShape>, Action<D>]> {
-  const base = scriptContext<V, W>(d);
   // A fixed but arbitrary UUID for the transient line.
   const transId: DiagramId = U.fromWords(0x585f9fe9, 0xa511a484, 0xf93f09bb, 0x274a2a10);
   const progressHint = "Click and drag to the next point. Finish with drag to target or single click.";
@@ -1622,7 +1632,7 @@ function* getArrowPoints<P, V, W, D>(
         const arr = arrowFunc(transId, mkLineShape([Unconnected(pt1), Unconnected(pt1)], []));
         const end1 = yield* mkEndPoint(d, "ConnectionFrom", arr, pt1);
         const act1 = act;
-        return yield* withHint<P, V, W, any, [Maybe<LineShape>, Action<D>]>(base, progressHint,
+        return yield* withHint<P, V, W, any, [Maybe<LineShape>, Action<D>]>(scriptContext<V, W>(d), progressHint,
           (function* (): Delta<D, [Maybe<LineShape>, Action<D>]> {
             const [shape, action2] = yield* dragEnd(mkLineShape([end1, Unconnected(pt1)], []), act1);
             if (view(lineEnd2, shape).tag === "Unconnected") {
@@ -1637,7 +1647,7 @@ function* getArrowPoints<P, V, W, D>(
       act = yield* processSingleAction(d, drawShape, M.empty(), act);
     }
   };
-  return yield* withHint<P, V, W, any, [Maybe<LineShape>, Action<D>]>(base, "Click and drag to start the arrow.",
+  return yield* withHint<P, V, W, any, [Maybe<LineShape>, Action<D>]>(scriptContext<V, W>(d), "Click and drag to start the arrow.",
     (function* (): Delta<D, [Maybe<LineShape>, Action<D>]> {
       const action1 = yield* yieldViews(d);
       return yield* execAction(action1);
@@ -1658,8 +1668,7 @@ export function* newDiagramBoxTool<P, V, W, D, A>(
   /** Message for undo log. */
   msg: string,
 ): Delta<D, Action<D>> {
-  const base = scriptContext<V, W>(d);
-  return yield* withHint<P, V, W, any, Action<D>>(base, "Click and drag to define the new shape.",
+  return yield* withHint<P, V, W, any, Action<D>>(scriptContext<V, W>(d), "Click and drag to define the new shape.",
     (function* (): Delta<D, Action<D>> {
       const act = yield* yieldViews(d);
       let mShape: Maybe<BoundBox>;
@@ -1690,6 +1699,7 @@ export function* newDiagramBoxTool<P, V, W, D, A>(
       }
       if (mShape.tag === "Just") {
         const shape = mShape.value;
+        const base = scriptContext<V, W>(d);
         yield* withHint<P, V, W, any, void>(base, "Enter details.", (function* (): Delta<D, void> {
           const r = yield* openDialog<P, V, W, A>(base, dSel, v1);
           if (r.tag === "Just") {
@@ -1715,10 +1725,10 @@ export function* newDiagramArrowTool<P, V, W, D, A>(
   /** Message for undo log. */
   msg: string,
 ): Delta<D, Action<D>> {
-  const base = scriptContext<V, W>(d);
   const [mShape, action] = yield* getArrowPoints<P, V, W, D>(d, (dId, s) => newItemF(dId, s, v1));
   if (mShape.tag === "Just") {
     const shape = mShape.value;
+    const base = scriptContext<V, W>(d);
     if (dialogM.tag === "Just") {
       const dialog1: Dialog_<Model<V>, null, A> = { ...dialogM.value, dialogButtons: OkButton };
       const r = yield* openDialog<P, V, W, A>(base, (_e, _i) => Just(dialog1), v1);

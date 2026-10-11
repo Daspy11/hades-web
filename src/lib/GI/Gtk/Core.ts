@@ -74,6 +74,7 @@ export class GObject {
     if (!list || list.length === 0) return undefined;
     const ordered = [...list.filter((h) => !h.after), ...list.filter((h) => h.after)];
     let result: any = undefined;
+    this.stopRequests.delete(signal);
     for (const h of ordered) {
       if (this.blocked.has(h.id)) continue;
       try {
@@ -82,10 +83,26 @@ export class GObject {
         console.error(`Error in "${signal}" handler:`, err);
         continue;
       }
+      if (this.stopRequests.delete(signal)) return result;
       if (result === true && isEventSignal(signal)) return true;
     }
     return result;
   }
+
+  /** Signals whose current emission was stopped (`signalStopEmissionByName`). */
+  private stopRequests = new Set<string>();
+  /** Stop the current emission of a signal: the remaining handlers are not run. */
+  stopEmission(signal: string): void {
+    this.stopRequests.add(signal);
+  }
+}
+
+/**
+ * `GI.GObject.signalStopEmissionByName obj name`: stop the current emission of the signal, so
+ * that the handlers after the calling one are not run. GTK's "_" or "-" spellings are accepted.
+ */
+export function signalStopEmissionByName(obj: GObject, signal: string): void {
+  obj.stopEmission(signal.replace(/_/g, "-"));
 }
 
 function isEventSignal(signal: string): boolean {
@@ -369,6 +386,10 @@ export class Widget extends GObject {
       case "widthRequest": this.widthRequest = value as number; break;
       case "heightRequest": this.heightRequest = value as number; break;
       case "hexpand": this.hexpand = value as boolean; this.hexpandSet = true; break;
+      case "expand":
+        this.hexpand = this.vexpand = value as boolean;
+        this.hexpandSet = this.vexpandSet = true;
+        break;
       case "vexpand": this.vexpand = value as boolean; this.vexpandSet = true; break;
       case "halign": this.halign = value as Align; break;
       case "valign": this.valign = value as Align; break;
@@ -648,21 +669,84 @@ export function widgetGetAllocatedWidth(w: Widget): number {
 export function widgetGetAllocatedHeight(w: Widget): number {
   return w.el ? w.el.clientHeight : 0;
 }
+/**
+ * Measure an element with some inline styles temporarily overridden (and then restored), so
+ * that its size request does not depend on its current allocation, as in GTK.
+ */
+function measureWith(el: HTMLElement, props: Record<string, string>, f: (el: HTMLElement) => number): number {
+  const s = el.style;
+  const saved = Object.keys(props).map((k): [string, string, string] => [k, s.getPropertyValue(k), s.getPropertyPriority(k)]);
+  for (const [k, v] of Object.entries(props)) s.setProperty(k, v, "important");
+  try {
+    return f(el);
+  } finally {
+    for (const [k, v, p] of saved) {
+      if (v) s.setProperty(k, v, p);
+      else s.removeProperty(k);
+    }
+  }
+}
+/** Horizontal or vertical margins of an element (GTK size requests include the margins). */
+function marginsOf(el: HTMLElement, horizontal: boolean): number {
+  const cs = getComputedStyle(el);
+  return horizontal
+    ? (parseFloat(cs.marginLeft) || 0) + (parseFloat(cs.marginRight) || 0)
+    : (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0);
+}
+/**
+ * `widgetGetPreferredWidth`: (minimum, natural) width, measured in the page as the
+ * `min-content` and `max-content` widths. Before the widget is shown, the width request.
+ */
 export function widgetGetPreferredWidth(w: Widget): [number, number] {
-  const width = w.el ? w.el.scrollWidth : Math.max(0, w.widthRequest);
-  return [width, width];
+  const el = w.el;
+  const req = Math.max(0, w.widthRequest);
+  if (!el) return [req, req];
+  const width = (e: HTMLElement): number => e.getBoundingClientRect().width;
+  const free = { flex: "none", "max-width": "none" };
+  const m = marginsOf(el, true);
+  const min = measureWith(el, { ...free, width: "min-content" }, width) + m;
+  const nat = measureWith(el, { ...free, width: "max-content" }, width) + m;
+  return [Math.ceil(Math.max(min, req)), Math.ceil(Math.max(nat, min, req))];
 }
+/** `widgetGetPreferredHeight`: (minimum, natural) height at the current width. */
 export function widgetGetPreferredHeight(w: Widget): [number, number] {
-  const h = w.el ? w.el.scrollHeight : Math.max(0, w.heightRequest);
-  return [h, h];
+  const el = w.el;
+  const req = Math.max(0, w.heightRequest);
+  if (!el) return [req, req];
+  const h = measureWith(el, { flex: "none", height: "auto", "max-height": "none" }, (e) => e.getBoundingClientRect().height) +
+    marginsOf(el, false);
+  const r = Math.ceil(Math.max(h, req));
+  return [r, r];
 }
-export function widgetGetPreferredHeightForWidth(w: Widget, _width: number): [number, number] {
-  return widgetGetPreferredHeight(w);
+/** `widgetGetPreferredHeightForWidth`: (minimum, natural) height if given this width. */
+export function widgetGetPreferredHeightForWidth(w: Widget, width: number): [number, number] {
+  const el = w.el;
+  if (!el) return widgetGetPreferredHeight(w);
+  const inner = Math.max(0, width - marginsOf(el, true));
+  const h = measureWith(
+    el,
+    { flex: "none", width: `${inner}px`, "min-width": "0", "max-width": "none", height: "auto", "max-height": "none" },
+    (e) => e.getBoundingClientRect().height,
+  ) + marginsOf(el, false);
+  const r = Math.ceil(Math.max(h, Math.max(0, w.heightRequest)));
+  return [r, r];
 }
 export function widgetGetPreferredWidthForHeight(w: Widget, _height: number): [number, number] {
   return widgetGetPreferredWidth(w);
 }
-export function widgetSizeAllocate(_w: Widget, _rect: unknown): void {}
+/**
+ * `widgetSizeAllocate`: CSS lays out the widgets, so an allocation only matters for the children
+ * of a `Layout`, whose geometry is explicit: they take its position and size.
+ */
+export function widgetSizeAllocate(w: Widget, rect: { x: number; y: number; width: number; height: number }): void {
+  const p = w.parent as (Widget & { positions?: Map<Widget, [number, number]>; sizes?: Map<Widget, [number, number]> }) | null;
+  if (!p || p.kind !== "layout" || !p.positions || !p.sizes) return;
+  const pos = p.positions.get(w), size = p.sizes.get(w);
+  if (pos && size && pos[0] === rect.x && pos[1] === rect.y && size[0] === rect.width && size[1] === rect.height) return;
+  p.positions.set(w, [rect.x, rect.y]);
+  p.sizes.set(w, [rect.width, rect.height]);
+  p.changed();
+}
 export function widgetAddEvents(_w: Widget, _events: unknown): void {}
 export function onWidgetMap(w: Widget, cb: () => void): SignalHandlerId {
   return w.connect("map", cb);

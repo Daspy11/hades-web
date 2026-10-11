@@ -486,6 +486,11 @@ export function forestStoreGetTree<A>(s: ForestStore<A>, p: TreePath): Tree<A> {
   if (!n) throw new Error("forestStoreGetTree: invalid path " + p.toString());
   return s.toTree(n);
 }
+/** `forestStoreLookup store path`: the subtree at the path, or `null` (gi-gtk-hs `Nothing`). */
+export function forestStoreLookup<A>(s: ForestStore<A>, p: TreePath): Tree<A> | null {
+  const n = p.indices.length === 0 ? null : s.nodeAt(p);
+  return n ? s.toTree(n) : null;
+}
 export function forestStoreGetForest<A>(s: ForestStore<A>): Tree<A>[] {
   return s.roots().map((n) => s.toTree(n));
 }

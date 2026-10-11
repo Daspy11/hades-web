@@ -12,6 +12,7 @@ import {
 } from "./Core";
 import type { Pixbuf, EventButton, EventKey, EventMotion, EventScroll, Rectangle, RGBA } from "../Gdk";
 import type { SimpleAction } from "../Gio";
+import * as Pango from "../Pango";
 
 // =============================================================================================
 // Box, ButtonBox
@@ -113,10 +114,13 @@ export class Label extends Widget {
       case "ellipsize": this.ellipsize = value as EllipsizeMode; break;
       case "maxWidthChars": this.maxWidthChars = value as number; break;
       case "widthChars": this.widthChars = value as number; break;
+      case "lines": this.lines = value as number; break;
       default: return super.setProperty(name, value);
     }
     this.changed();
   }
+  /** Maximum number of lines when ellipsizing a wrapped label (-1: unlimited). */
+  lines = -1;
 }
 export function labelNew(text: string | null): Label {
   const l = new Label();
@@ -184,9 +188,43 @@ export function labelSetWidthChars(l: Label, n: number): void {
   l.widthChars = n;
   l.changed();
 }
-/** Pango layout offsets are not meaningful in HTML; always (0, 0). */
-export function labelGetLayoutOffsets(_l: Label): [number, number] {
-  return [0, 0];
+/**
+ * `labelGetLayoutOffsets`: where the text is drawn, relative to the parent widget (the event
+ * box of a clickable label), i.e. the label's content box. (0, 0) before it is shown.
+ */
+export function labelGetLayoutOffsets(l: Label): [number, number] {
+  const el = l.el, pel = l.parent?.el;
+  if (!el || !pel || typeof getComputedStyle === "undefined") return [0, 0];
+  const r = el.getBoundingClientRect(), pr = pel.getBoundingClientRect();
+  const cs = getComputedStyle(el);
+  return [
+    Math.round(r.left - pr.left + (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.borderLeftWidth) || 0)),
+    Math.round(r.top - pr.top + (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.borderTopWidth) || 0)),
+  ];
+}
+/**
+ * `labelGetLayout`: a Pango layout of the label's text in the label's font and (when wrapping)
+ * width, to map positions to text indices with `Pango.layoutXyToIndex`.
+ */
+export function labelGetLayout(l: Label): Pango.Layout {
+  const layout = Pango.layoutNew(null);
+  Pango.layoutSetText(layout, labelGetText(l));
+  const el = l.el;
+  if (el && typeof getComputedStyle !== "undefined") {
+    const cs = getComputedStyle(el);
+    const f = Pango.fontDescriptionNew();
+    Pango.fontDescriptionSetFamily(f, cs.fontFamily.replace(/["']/g, ""));
+    Pango.fontDescriptionSetAbsoluteSize(f, (parseFloat(cs.fontSize) || 13) * Pango.SCALE);
+    if ((parseInt(cs.fontWeight, 10) || 400) >= 600) Pango.fontDescriptionSetWeight(f, Pango.WeightBold);
+    if (cs.fontStyle === "italic") Pango.fontDescriptionSetStyle(f, Pango.StyleItalic);
+    Pango.layoutSetFontDescription(layout, f);
+    if (l.wrap) {
+      const width = el.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
+      Pango.layoutSetWidth(layout, Math.max(0, width) * Pango.SCALE);
+      Pango.layoutSetWrap(layout, l.wrapMode === "WrapModeNone" ? Pango.WrapModeWord : l.wrapMode);
+    }
+  }
+  return layout;
 }
 
 // =============================================================================================
@@ -622,10 +660,10 @@ export function scrolledWindowGetHadjustment(s: ScrolledWindow): Adjustment {
 export function scrolledWindowGetVadjustment(s: ScrolledWindow): Adjustment {
   return s.vadj;
 }
-export function scrollableGetHadjustment(s: ScrolledWindow | Viewport): Adjustment {
+export function scrollableGetHadjustment(s: ScrolledWindow | Viewport | Layout): Adjustment {
   return s instanceof ScrolledWindow ? s.hadj : (s.parent instanceof ScrolledWindow ? s.parent.hadj : new Adjustment());
 }
-export function scrollableGetVadjustment(s: ScrolledWindow | Viewport): Adjustment {
+export function scrollableGetVadjustment(s: ScrolledWindow | Viewport | Layout): Adjustment {
   return s instanceof ScrolledWindow ? s.vadj : (s.parent instanceof ScrolledWindow ? s.parent.vadj : new Adjustment());
 }
 
@@ -639,6 +677,13 @@ export function viewportNew(_h: Adjustment | null, _v: Adjustment | null): Viewp
 
 export class EventBox extends Bin {
   override readonly kind: string = "eventBox";
+  /** Whether the event box draws its own background (every element is "visible" in HTML). */
+  visibleWindow = true;
+  override setProperty(name: string, value: unknown): void {
+    if (name === "visibleWindow") this.visibleWindow = value as boolean;
+    else return super.setProperty(name, value);
+    this.changed();
+  }
 }
 export function eventBoxNew(): EventBox {
   return new EventBox();
@@ -649,6 +694,8 @@ export class Layout extends Container {
   width = 0;
   height = 0;
   positions = new Map<Widget, [number, number]>();
+  /** Sizes of children given by `widgetSizeAllocate` (otherwise their natural size). */
+  sizes = new Map<Widget, [number, number]>();
 }
 export function layoutNew(_h: Adjustment | null, _v: Adjustment | null): Layout {
   return new Layout();
@@ -677,8 +724,11 @@ export class Grid extends Container {
   columnSpacing = 0;
   rowHomogeneous = false;
   columnHomogeneous = false;
+  /** GtkOrientable: only affects GtkGrid's add/remove order, which is not used here. */
+  orientation: Orientation = "OrientationHorizontal";
   override setProperty(name: string, value: unknown): void {
-    if (name === "rowSpacing") this.rowSpacing = value as number;
+    if (name === "orientation") this.orientation = value as Orientation;
+    else if (name === "rowSpacing") this.rowSpacing = value as number;
     else if (name === "columnSpacing") this.columnSpacing = value as number;
     else if (name === "rowHomogeneous") this.rowHomogeneous = value as boolean;
     else if (name === "columnHomogeneous") this.columnHomogeneous = value as boolean;
@@ -727,11 +777,12 @@ export class Image extends Widget {
   pixelSize = -1;
   iconSize: IconSize | number = "IconSizeButton";
   override setProperty(name: string, value: unknown): void {
-    if (name === "iconName") this.iconName = value as string;
+    // Setting one of the image sources replaces the others (GtkImage storage type).
+    if (name === "iconName") Object.assign(this, { iconName: value as string, pixbuf: null, file: null });
     else if (name === "pixelSize") this.pixelSize = value as number;
     else if (name === "iconSize") this.iconSize = value as IconSize;
-    else if (name === "pixbuf") this.pixbuf = value as Pixbuf;
-    else if (name === "file") this.file = value as string;
+    else if (name === "pixbuf") Object.assign(this, { pixbuf: value as Pixbuf, iconName: null, file: null });
+    else if (name === "file") Object.assign(this, { file: value as string, iconName: null, pixbuf: null });
     else return super.setProperty(name, value);
     this.changed();
   }
@@ -822,6 +873,11 @@ export class TextBuffer extends GObject {
     this.view?.changed();
     this.emit("changed");
     if (user) this.emit("end-user-action");
+  }
+  /** `Gtk.set buffer [#text := t]`. */
+  setProperty(name: string, value: unknown): void {
+    if (name === "text") this.setTextInternal(value as string, false);
+    else (this as any)[name] = value;
   }
 }
 export class TextView extends Widget {

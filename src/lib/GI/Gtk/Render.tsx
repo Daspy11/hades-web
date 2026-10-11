@@ -603,7 +603,8 @@ function LabelView({ w, layout }: { w: W.Label; layout?: LayoutStyle }) {
 
 function EntryView({ w, layout }: { w: W.Entry; layout?: LayoutStyle }) {
   const el = useRef<HTMLDivElement | null>(null);
-  const style: LayoutStyle = { ...(w.widthChars > 0 ? { width: `calc(${w.widthChars}ch + 16px)` } : {}), ...layout };
+  // Padding (16px) and border (2px) plus room for the caret: GTK's width-chars counts text only.
+  const style: LayoutStyle = { ...(w.widthChars > 0 ? { width: `calc(${w.widthChars}ch + 20px)` } : {}), ...layout };
   const props = baseProps(w, w.hasFrame ? "" : "flat", style);
   const icon = (pos: "EntryIconPositionPrimary" | "EntryIconPositionSecondary") => {
     const name = w.icons[pos];

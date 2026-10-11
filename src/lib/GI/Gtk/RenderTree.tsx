@@ -6,13 +6,13 @@ import * as Checkbox from "@radix-ui/react-checkbox";
 import * as Select from "@radix-ui/react-select";
 import { baseProps, keyHandler, useWidget, WidgetView, MarkupText, type LayoutStyle } from "./Render";
 import {
-  TreeView, TreeViewColumn, CellRenderer, computeCellProps, treeSelectionSelectPath,
+  TreeView, TreeViewColumn, CellRenderer, computeCellProps, treeSelectionSelectPath, treeViewConvertWidgetToBinWindowCoords,
 } from "./TreeView";
 import { RowNode, TreePath, TreeModel } from "./TreeModel";
 import type { IconView } from "./Choosers";
 import { iconUrl } from "./IconTheme";
 import { DragContext, eventKeyFromDom, modifiersOf, type EventButton } from "../Gdk";
-import { stripMnemonic } from "./Core";
+import { stripMnemonic, type Widget } from "./Core";
 
 interface VisibleRow {
   node: RowNode;
@@ -47,18 +47,50 @@ function colourOf(p: Record<string, any>, key: "foreground" | "background"): str
     const f = (x: number) => Math.round(x * 255);
     return `rgba(${f(rgba.red)}, ${f(rgba.green)}, ${f(rgba.blue)}, ${rgba.alpha ?? 1})`;
   }
-  const c = p[key] ?? (key === "background" ? p.cellBackground : undefined);
+  const c = p[key];
   return c ? String(c) : undefined;
 }
 
-function CellView({ v, col, cell, props, path, node }: {
+/**
+ * The `cell-background(-rgba)` of a renderer, which GTK paints over the whole cell area
+ * (and, as GTK does, not on selected rows).
+ */
+function cellBackgroundOf(p: Record<string, any>): string | undefined {
+  const rgba = p.cellBackgroundRgba;
+  if (rgba && typeof rgba === "object") {
+    const f = (x: number) => Math.round(x * 255);
+    return `rgba(${f(rgba.red)}, ${f(rgba.green)}, ${f(rgba.blue)}, ${rgba.alpha ?? 1})`;
+  }
+  return p.cellBackground ? String(p.cellBackground) : undefined;
+}
+
+/**
+ * The in-place editor of a cell. Once mounted it emits `size-allocate` on the editable with its
+ * rectangle in bin-window coordinates of the tree view, as GTK does when it allocates the editable.
+ */
+function CellEditorView({ v, entry }: { v: TreeView; entry: Widget }) {
+  const ref = useRef<HTMLSpanElement | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    const tv = v.el;
+    if (!el || !tv || !entry.hasHandlers("size-allocate")) return;
+    const r = el.getBoundingClientRect(), t = tv.getBoundingClientRect();
+    const [x, y] = treeViewConvertWidgetToBinWindowCoords(v, r.left - t.left, r.top - t.top);
+    entry.emit("size-allocate", { x, y, width: r.width, height: r.height });
+  }, [v, entry]);
+  return <span className="gtk-cell-editor" ref={ref}><WidgetView w={entry} /></span>;
+}
+
+function CellView({ v, col, cell, props, path, node, selected }: {
   v: TreeView; col: TreeViewColumn; cell: CellRenderer; props: Record<string, any>; path: TreePath; node: RowNode;
+  selected?: boolean;
 }) {
   if (props.visible === false) return null;
   const editing = v.editing && v.editing.cell === cell && v.editing.path === path.toString() ? v.editing : null;
   const style: React.CSSProperties = {
-    color: colourOf(props, "foreground"),
-    background: colourOf(props, "background"),
+    // As in GTK, the foreground and background colours are not used on selected rows.
+    color: selected ? undefined : colourOf(props, "foreground"),
+    background: selected ? undefined : colourOf(props, "background"),
     fontWeight: props.weight && props.weight >= 600 ? 700 : props.weight === "WeightBold" ? 700 : undefined,
     fontStyle: props.style === "StyleItalic" ? "italic" : undefined,
   };
@@ -86,7 +118,7 @@ function CellView({ v, col, cell, props, path, node }: {
       if (editing) return <ComboCellEditor v={v} cell={cell} props={props} path={path} />;
       return <span className="gtk-cell-text" style={style}>{String(props.text ?? "")}</span>;
     default: {
-      if (editing) return <span className="gtk-cell-editor"><WidgetView w={editing.entry} /></span>;
+      if (editing) return <CellEditorView v={v} entry={editing.entry} />;
       const text = props.markup !== undefined && props.markup !== null
         ? <MarkupText markup={String(props.markup)} />
         : String(props.text ?? "");
@@ -436,13 +468,15 @@ export function TreeViewView({ w, layout }: { w: TreeView; layout?: LayoutStyle 
               const startCells = col.cells.filter((pc) => !pc.end);
               const endCells = col.cells.filter((pc) => pc.end).reverse();
               const ordered = [...startCells, ...endCells];
+              const cps = ordered.map((pc) => (m ? computeCellProps(m, row.node, col, pc.cell) : {}));
+              const cellBg = selected ? undefined : cps.map(cellBackgroundOf).find((x) => x !== undefined);
               return (
                 <div
                   key={ci}
                   className={"gtk-treeview-cell" + (selected ? " selected" : "") + (dd ? " " + cls.split(" ").filter((x) => x.startsWith("drop")).join(" ") : "")}
                   data-col={realCi}
                   data-path={row.path.toString()}
-                  style={first ? { paddingLeft: 4 + row.depth * 18 } : undefined}
+                  style={first || cellBg ? { ...(first ? { paddingLeft: 4 + row.depth * 18 } : {}), ...(cellBg ? { background: cellBg } : {}) } : undefined}
                 >
                   {first ? (
                     <span
@@ -456,12 +490,12 @@ export function TreeViewView({ w, layout }: { w: TreeView; layout?: LayoutStyle 
                       }}
                     />
                   ) : null}
-                  {ordered.map((pc) => {
+                  {ordered.map((pc, oi) => {
                     const k = col.cells.indexOf(pc);
-                    const cp = m ? computeCellProps(m, row.node, col, pc.cell) : {};
+                    const cp = cps[oi];
                     return (
                       <span key={k} data-cell={k} data-col={realCi} className={"gtk-cell" + (pc.expand ? " expand" : "")}>
-                        <CellView v={w} col={col} cell={pc.cell} props={cp} path={row.path} node={row.node} />
+                        <CellView v={w} col={col} cell={pc.cell} props={cp} path={row.path} node={row.node} selected={selected} />
                       </span>
                     );
                   })}
