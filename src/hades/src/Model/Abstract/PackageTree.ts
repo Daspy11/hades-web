@@ -61,7 +61,7 @@ import * as U from "@/lib/Data/UUID";
 import * as B from "@/lib/Reactive/Banana";
 import { Just, Nothing, fromJust, fromMaybe, isJust, type Maybe } from "@/lib/Data/Maybe";
 import { Left, Right, type Either } from "@/lib/Data/Either";
-import { EqSym, OrdSym, equals, type Ordering } from "@/lib/Data/Ord";
+import { EqSym, OrdSym, compare, equals, type Ordering } from "@/lib/Data/Ord";
 import { today, type Day } from "@/lib/Data/Time";
 import { Node, drawForest, flatten, fmapTree, type Forest, type Tree } from "@/lib/Data/Tree";
 import { absurd } from "@/lib/Prelude";
@@ -154,11 +154,17 @@ export const JSON_Name: J.JSONCodec<Name> = J.codec(
   (v) => J.withText("name", (txt) => Name(T.strip(txt)), v),
 );
 
-/** `instance ToJSONKey Name` and `instance FromJSONKey Name` (which strips white space). */
+/**
+ * `instance ToJSONKey Name` and `instance FromJSONKey Name` (which strips white space).
+ *
+ * The comparator is the generic `compare`, which orders names with their `[OrdSym]` method
+ * (i.e. "compare_Name"); using the same function as `M.empty()` keeps parsed maps and maps
+ * built in code identical.
+ */
 export const JSONKey_Name: J.JSONKey<Name> = {
   toKey: (n) => view(nameText, n),
   fromKey: (s) => Name(T.strip(s)),
-  cmp: compare_Name,
+  cmp: compare,
 };
 
 /** JSON codec for `Map Name ModelId`: an object keyed by the names. */
@@ -395,6 +401,8 @@ the responsibility of each item.
  */
 export function JSON_Entity<V>(cls: EntityClass<V>): J.JSONCodec<Entity<V>> {
   const cv = cls.entityJ;
+  // `v .:? k .!= thisChange`, evaluating "thisChange" only when it is needed.
+  const fromMaybeStamp = (m: Maybe<Stamp>): Stamp => (m.tag === "Just" ? m.value : thisChange());
   const parseExtVals = (v: J.JSONObject, nm: string): ExtensionValues =>
     J.alt<ExtensionValues>(
       () => J.field(v, nm, JSON_ExtensionValues),
@@ -406,8 +414,8 @@ export function JSON_Entity<V>(cls: EntityClass<V>): J.JSONCodec<Entity<V>> {
     J.field(v, "children", nameMapJ),
     J.field(v, "contents", cv),
     parseExtVals(v, "extensions"),
-    J.fieldDefault(v, "created", stampJ, thisChange()),
-    J.fieldDefault(v, "modified", stampJ, thisChange()),  // For legacy files, timestamp is now.
+    fromMaybeStamp(J.fieldMaybe(v, "created", stampJ)),
+    fromMaybeStamp(J.fieldMaybe(v, "modified", stampJ)),  // For legacy files, timestamp is now.
   );
   const parseV05 = (v: J.JSONObject): Entity<V> => {
     const pkg = J.fieldMaybe(v, "package", J.mapJ(J.textKey, J.uuidJ));
@@ -538,11 +546,7 @@ export function entityVariantProperties<V = any>(cls: EntityClass<V>, model: Mod
 export function entityStampsAsFields<V>(_cls: EntityClass<V>, e: Entity<V>): ExtensionValues {
   const stampAsFields = (dateField: FieldId, userField: FieldId, [user, date]: Stamp): ExtensionValues =>
     M.fromList<FieldId, ExtValue>([[userField, ExtText(user)], [dateField, ExtDate(date)]]);
-  const entityStampsByName = fieldsByName(entityStampFields);
-  const created = fromJust(M.lookup("Created", entityStampsByName)).fieldId;
-  const createdBy = fromJust(M.lookup("CreatedBy", entityStampsByName)).fieldId;
-  const modified = fromJust(M.lookup("Modified", entityStampsByName)).fieldId;
-  const modifiedBy = fromJust(M.lookup("ModifiedBy", entityStampsByName)).fieldId;
+  const { created, createdBy, modified, modifiedBy } = stampFieldIds();
   return M.union(
     stampAsFields(created, createdBy, e.entityCreated),
     stampAsFields(modified, modifiedBy, e._entityModified),
@@ -557,6 +561,23 @@ export function entityStampsAsFields<V>(_cls: EntityClass<V>, e: Entity<V>): Ext
  */
 export function entityPropertiesWithStamps<V>(cls: EntityClass<V>, e: Entity<V>): ExtensionValues {
   return M.union(view(entityProperties(cls), e), entityStampsAsFields(cls, e));
+}
+
+/**
+ * The field IDs of the stamp fields (the `where` clause of "entityStampsAsFields", computed once).
+ */
+let stampFieldIdsCache: { created: FieldId; createdBy: FieldId; modified: FieldId; modifiedBy: FieldId } | null = null;
+function stampFieldIds() {
+  if (stampFieldIdsCache === null) {
+    const entityStampsByName = fieldsByName(entityStampFields);
+    stampFieldIdsCache = {
+      created: fromJust(M.lookup("Created", entityStampsByName)).fieldId,
+      createdBy: fromJust(M.lookup("CreatedBy", entityStampsByName)).fieldId,
+      modified: fromJust(M.lookup("Modified", entityStampsByName)).fieldId,
+      modifiedBy: fromJust(M.lookup("ModifiedBy", entityStampsByName)).fieldId,
+    };
+  }
+  return stampFieldIdsCache;
 }
 
 /** The list of stamp fields definitions. These are read-only. */

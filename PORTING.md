@@ -549,3 +549,29 @@ Decisions made while porting that other modules depend on. Read before importing
 * Import: `NameClashAction` string enum; `importExcel(ctx, clash, book, template)`.
 * Tests: `src/testSetup.ts` registers structural equality for `HMap`/`HSet` globally, so
   `toEqual` on maps/sets works in every test file.
+
+### Model.Abstract.PackageTree (E1)
+
+* Runners take the dictionary first: `runModelEdit(cls, prsm, st, act)`, `execModelEdit(cls, ...)`,
+  `evalModelEdit(cls, prsm, model, act)` (fresh UUID generator per call), `queryModel(cls, prsm,
+  modelB, e, f)`. Results are `Either` as in Haskell.
+* Errors: thrown `ModelErrorException` (`.modelError`); constructors `UserError`, `InternalError`;
+  `show_ModelError`. `try_` (also `try`) and `catchError(ctx, act, (c, err) => ...)` restore
+  `ctx.state`; `throwUser/throwInternal/throwError` accept `(msg)` or `(ctx, msg)`.
+* Sub-traversals: `withSubtype(ctx, p, act)`, `withBaseType(ctx, act)`,
+  `usingTraversal(ctx, (c, prsm) => ...)`; for generator scripts `withSubtypeCtx(ctx, p)`,
+  `withBaseTypeCtx(ctx)`. Instances `pure_/fmap_/bind_ModelEdit`, `fmap_ModelUpdate`.
+* Callback convention: Haskell `x -> ModelEdit v w a` arguments become `(ctx, x) => A`; pure
+  function arguments stay pure (`addEntity(ctx, (parentId) => entity)`).
+* `EntityClass<A, PM = any>` extends `Reflective<A>` and adds `entityJ` (JSON codec for `a`),
+  `packageMetaJ`, `packageMetaMempty`, `packageMetaAppend`. Equality uses structural `equals`.
+  `Package<A, PM>`, `Model<V, PM>` carry the package-meta type.
+* `Name(txt)` (`_0`, class `NameClass`, natural order), `nameText` iso, `JSON_Name`,
+  `JSONKey_Name`, `eq_/compare_/show_Name`. Stamps: `thisChange()`; `Stamp = readonly [string, Day]`.
+* Codecs `JSON_Package(cls)`, `JSON_Entity(cls)`, `ToJSON_Entity(cv)`, `JSON_Model(cls)`,
+  `Reflective_Package(cls)`. Helpers `entityName(cls)`, `entityProperties(cls)`,
+  `entityVariantProperties(cls, model)`, `emptyModel(cls, name)`, `show_Model(cls, m)`; plain lenses
+  are zero-arg functions `entityParent()`, `entityChildren()`, `entityContents()`, ...
+  `delete` is `delete_`. ModelEdit functions returning `()` return `void`.
+* `src/hades/test/Test/GI/PackageTree.test.ts` has a `describe.skip` block for the GTK half; enable
+  it when `Model/GI/PackageTree.ts` is ported.

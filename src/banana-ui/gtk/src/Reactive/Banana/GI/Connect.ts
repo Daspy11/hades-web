@@ -24,6 +24,12 @@ import { reactimate1, reactimate1_ } from "@/banana-ui/base/Reactive/Banana/Comm
 // Generating Events.
 
 /**
+ * The handler result an action returns alongside the event value. For toolkit handlers returning
+ * `void` the Haskell `()` is written `null` (or `undefined`).
+ */
+export type SignalResult<R> = [R] extends [void] ? R | null : R;
+
+/**
  * Register a GTK signal as an input.
  *
  * If you only want to know that the signal occured then use @return ((), ())@ as the action
@@ -36,14 +42,14 @@ import { reactimate1, reactimate1_ } from "@/banana-ui/base/Reactive/Banana/Comm
  */
 export function registerIOSignal<O, R, V>(
   obj: O,
-  sig: (obj: O, handler: () => NoInfer<R>) => Gtk.SignalHandlerId,
-  act: () => readonly [R, V],
+  sig: (obj: O, handler: () => R) => Gtk.SignalHandlerId,
+  act: () => readonly [SignalResult<R>, V],
 ): B.Event<V> {
   const [event, runHandlers] = B.newEvent<V>();
   sig(obj, () => {
     const [r, v] = act();
     runHandlers(v);
-    return r;
+    return r as R;
   });
   return event;
 }
@@ -51,14 +57,14 @@ export function registerIOSignal<O, R, V>(
 /** Register a GTK signal with one argument. */
 export function registerIOSignal1<O, A1, R, V>(
   obj: O,
-  sig: (obj: O, handler: (a1: A1) => NoInfer<R>) => Gtk.SignalHandlerId,
-  act: (a1: A1) => readonly [R, V],
+  sig: (obj: O, handler: (a1: A1) => R) => Gtk.SignalHandlerId,
+  act: (a1: A1) => readonly [SignalResult<R>, V],
 ): B.Event<V> {
   const [event, runHandlers] = B.newEvent<V>();
   sig(obj, (arg1: A1) => {
     const [r, v] = act(arg1);
     runHandlers(v);
-    return r;
+    return r as R;
   });
   return event;
 }
@@ -66,14 +72,14 @@ export function registerIOSignal1<O, A1, R, V>(
 /** Register a GTK signal with two arguments. */
 export function registerIOSignal2<O, A1, A2, R, V>(
   obj: O,
-  sig: (obj: O, handler: (a1: A1, a2: A2) => NoInfer<R>) => Gtk.SignalHandlerId,
-  act: (a1: A1, a2: A2) => readonly [R, V],
+  sig: (obj: O, handler: (a1: A1, a2: A2) => R) => Gtk.SignalHandlerId,
+  act: (a1: A1, a2: A2) => readonly [SignalResult<R>, V],
 ): B.Event<V> {
   const [event, runHandlers] = B.newEvent<V>();
   sig(obj, (arg1: A1, arg2: A2) => {
     const [r, v] = act(arg1, arg2);
     runHandlers(v);
-    return r;
+    return r as R;
   });
   return event;
 }
@@ -81,14 +87,14 @@ export function registerIOSignal2<O, A1, A2, R, V>(
 /** Register a GTK signal with three arguments. */
 export function registerIOSignal3<O, A1, A2, A3, R, V>(
   obj: O,
-  sig: (obj: O, handler: (a1: A1, a2: A2, a3: A3) => NoInfer<R>) => Gtk.SignalHandlerId,
-  act: (a1: A1, a2: A2, a3: A3) => readonly [R, V],
+  sig: (obj: O, handler: (a1: A1, a2: A2, a3: A3) => R) => Gtk.SignalHandlerId,
+  act: (a1: A1, a2: A2, a3: A3) => readonly [SignalResult<R>, V],
 ): B.Event<V> {
   const [event, runHandlers] = B.newEvent<V>();
   sig(obj, (arg1: A1, arg2: A2, arg3: A3) => {
     const [r, v] = act(arg1, arg2, arg3);
     runHandlers(v);
-    return r;
+    return r as R;
   });
   return event;
 }
@@ -96,14 +102,14 @@ export function registerIOSignal3<O, A1, A2, A3, R, V>(
 /** Register a GTK signal with four arguments. */
 export function registerIOSignal4<O, A1, A2, A3, A4, R, V>(
   obj: O,
-  sig: (obj: O, handler: (a1: A1, a2: A2, a3: A3, a4: A4) => NoInfer<R>) => Gtk.SignalHandlerId,
-  act: (a1: A1, a2: A2, a3: A3, a4: A4) => readonly [R, V],
+  sig: (obj: O, handler: (a1: A1, a2: A2, a3: A3, a4: A4) => R) => Gtk.SignalHandlerId,
+  act: (a1: A1, a2: A2, a3: A3, a4: A4) => readonly [SignalResult<R>, V],
 ): B.Event<V> {
   const [event, runHandlers] = B.newEvent<V>();
   sig(obj, (arg1: A1, arg2: A2, arg3: A3, arg4: A4) => {
     const [r, v] = act(arg1, arg2, arg3, arg4);
     runHandlers(v);
-    return r;
+    return r as R;
   });
   return event;
 }
@@ -111,14 +117,14 @@ export function registerIOSignal4<O, A1, A2, A3, A4, R, V>(
 /** Register a GTK signal with five arguments. */
 export function registerIOSignal5<O, A1, A2, A3, A4, A5, R, V>(
   obj: O,
-  sig: (obj: O, handler: (a1: A1, a2: A2, a3: A3, a4: A4, a5: A5) => NoInfer<R>) => Gtk.SignalHandlerId,
-  act: (a1: A1, a2: A2, a3: A3, a4: A4, a5: A5) => readonly [R, V],
+  sig: (obj: O, handler: (a1: A1, a2: A2, a3: A3, a4: A4, a5: A5) => R) => Gtk.SignalHandlerId,
+  act: (a1: A1, a2: A2, a3: A3, a4: A4, a5: A5) => readonly [SignalResult<R>, V],
 ): B.Event<V> {
   const [event, runHandlers] = B.newEvent<V>();
   sig(obj, (arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5) => {
     const [r, v] = act(arg1, arg2, arg3, arg4, arg5);
     runHandlers(v);
-    return r;
+    return r as R;
   });
   return event;
 }
@@ -126,14 +132,14 @@ export function registerIOSignal5<O, A1, A2, A3, A4, A5, R, V>(
 /** Register a GTK signal with four arguments. (Haskell comment; this one takes six.) */
 export function registerIOSignal6<O, A1, A2, A3, A4, A5, A6, R, V>(
   obj: O,
-  sig: (obj: O, handler: (a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6) => NoInfer<R>) => Gtk.SignalHandlerId,
-  act: (a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6) => readonly [R, V],
+  sig: (obj: O, handler: (a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6) => R) => Gtk.SignalHandlerId,
+  act: (a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6) => readonly [SignalResult<R>, V],
 ): B.Event<V> {
   const [event, runHandlers] = B.newEvent<V>();
   sig(obj, (arg1: A1, arg2: A2, arg3: A3, arg4: A4, arg5: A5, arg6: A6) => {
     const [r, v] = act(arg1, arg2, arg3, arg4, arg5, arg6);
     runHandlers(v);
-    return r;
+    return r as R;
   });
   return event;
 }
