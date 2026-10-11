@@ -35,7 +35,7 @@ import type { NamedRelation, Relation } from "@/hades/src/Model/Reflection/Named
 import * as NR from "@/hades/src/Model/Reflection/NamedRelation";
 import { reflection, valueReferences } from "@/hades/src/Model/Reflection/Reflective";
 import { type FieldId, withBuiltIn } from "@/hades/src/Model/Reflection/Types";
-import { type ExtensionValues, type Variant, displayValue } from "@/hades/src/Model/Reflection/Values";
+import { type ExtValue, type ExtensionValues, type Variant, displayValue } from "@/hades/src/Model/Reflection/Values";
 import {
   type Entity, type EntityClass, type Model, type ModelEditCtx, type ModelId, type Stamp,
   addCheckedRelation, current, descriptionField, entityName, entityProperties, evalModelEdit,
@@ -138,17 +138,17 @@ export function reflectiveDialog<V, W>(
     const fieldsFrame: GadgetF_<Model<V>, W, Sel> =
       frame((_: Sel) => Just("Fields"),
         traversingOver(
-          M.empty<FieldId, any>() as ExtensionValues,
+          M.empty<FieldId, ExtValue>(),
           _Just<readonly [Entity<V>, ReferenceValues]>()
             .dot(_1<Entity<V>, ReferenceValues>())
             .dot(entityProperties(cls)),
           form<Model<V>, W, ExtensionValues>("Vertical",
             fields.map((f) => fieldElement1<Model<V>, W>(true, f)))));
-    // Use traversingOver because we don't create an entity if none exists.
+      // Use traversingOver because we don't create an entity if none exists.
     const referencesFrame: GadgetF_<Model<V>, W, Sel> =
       frame((_: Sel) => Just("References"),
         traversingOver(
-          M.empty<Relation, S.Set<ModelId>>() as ReferenceValues,
+          M.empty<Relation, S.Set<ModelId>>(),
           _Just<readonly [Entity<V>, ReferenceValues]>().dot(_2<Entity<V>, ReferenceValues>()),
           form<Model<V>, W, ReferenceValues>("Vertical", refs.map(refElement))));
     const showDate = (day: string): T.Text => T.pack(formatDay("%d %b %y", day));

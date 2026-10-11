@@ -526,3 +526,26 @@ Decisions made while porting that other modules depend on. Read before importing
   returns its writer synchronously.
 * `@/lib/System/IO` provides virtual file paths (`/handle/...`, `/upload/...`, `/download/...`,
   `/builtin/...`): `readFileText`, `readFileBytes`, `writeFileData`, `takeFileName` etc.
+
+### Model.Abstract.{Properties,Import,ModelExport}, Model.Query.Base (E2)
+
+* `Codec.Xlsx` → `src/lib/Codec/Xlsx.ts`: data model only (`Xlsx`, `Worksheet`, `CellMap` keyed by
+  `[row, col]`, `Cell`, `CellValue` constructors, lenses `xlSheets`, `wsCells`, `cellValue`, ...).
+  Reading/writing `.xlsx` files (`toXlsx`/`fromXlsx`) is to be added there by whoever ports the
+  first module that needs it (Model.GI.Export / Model.Matrices.Excel), additively.
+* `QueryStep<V>` = `{ runStep(outers, model, inputs) }` built with `QueryStep(f)`;
+  `append_/mempty_/mconcat_QueryStep`, `noStep`, `inStep(q1, q2)`. Constrained steps take `cls`
+  first even when unused: `step(cls, rels)`, `filterStep(cls, p)`, `parentStep(cls)`,
+  `childrenStep(cls)`, `filterVariants(cls, vars)`, `followArrows(cls, vars, rel1, rel2)`.
+  `Query<V>` is opaque (`compileQuery`, `runQuery`, `subQuery`).
+* Properties: `putReferenceValues(ctx, e, refs)`; `refPicker(cls, single, pred)`,
+  `modelFilter(cls, pred, model)`, `showEntitySet(cls, model, s)`; `reflectiveDialog(cls, menuF)`
+  returns `(model, sel) => Maybe<Dialog>`; `modelItemSpecifier(cls, predicate, menuF)` /
+  `modelSubsetSpecifier(...)` with a curried predicate `(model) => (entity) => boolean`.
+* ModelExport: `ExportList<V>` erased to `readonly Entity<V>[]`; codecs `JSON_ExportList(cls)`,
+  `JSON_ModelExport(cls)` (use `cls.entityJ`); `ModelExport(contents, rels, fields, refTypes, exts)`;
+  edits `makeExport(ctx, items, meta)`, `importEntities(ctx, location, nr, vs)`,
+  `importMetadata(ctx, export)`.
+* Import: `NameClashAction` string enum; `importExcel(ctx, clash, book, template)`.
+* Tests: `src/testSetup.ts` registers structural equality for `HMap`/`HSet` globally, so
+  `toEqual` on maps/sets works in every test file.

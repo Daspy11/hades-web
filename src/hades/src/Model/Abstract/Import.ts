@@ -23,7 +23,7 @@ import {
   type CellValue, type Worksheet, type Xlsx, cellValue, wsCells, xlDateBase, xlSheets,
 } from "@/lib/Codec/Xlsx";
 import {
-  type EntityClass, type ModelEditCtx, type ModelId, Name, Package,
+  type ModelEditCtx, type ModelId, Name, Package,
   currentChildren, current, currentId, currentName, entityStampFields, followPath, getModel,
   goToEntity, mkEntity, nameField, nameText, setData, throwUser,
 } from "./PackageTree";

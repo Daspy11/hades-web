@@ -13,5 +13,5 @@ export default defineConfig({
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },
   build: { target: "es2022", chunkSizeWarningLimit: 4000 },
-  test: { environment: "jsdom", include: ["src/**/*.test.ts"] },
+  test: { environment: "jsdom", include: ["src/**/*.test.ts"], setupFiles: ["src/testSetup.ts"] },
 } as any);
