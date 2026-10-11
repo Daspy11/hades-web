@@ -1,7 +1,7 @@
 /**
  * Scratch demo for `Hades.GI.BasicShapes` (open the app with `?demo=h1`): draws the basic
  * shapes, text layouts, arrow heads and decorations on a drawing area, much as the GSN and
- * causality diagrams use them. `&zoom=2` draws at twice the size.
+ * causality diagrams use them. `&zoom=2` draws at twice the size; `&ox=..&oy=..` scroll.
  */
 import * as Gtk from "@/lib/GI/Gtk";
 import * as Gdk from "@/lib/GI/Gdk";
@@ -12,7 +12,7 @@ import * as C from "@/lib/Data/Colour";
 import { Just, Nothing } from "@/lib/Data/Maybe";
 import { Menu } from "@/banana-ui/base/Reactive/Banana/Menu";
 import {
-  BoxShapeClass_Diamond, BoxShapeClass_Ellipse, BoxShapeClass_Oval, BoxShapeClass_Parallelogram,
+  BoxShapeClass_Diamond, BoxShapeClass_Ellipse, BoxShapeClass_Rectangle, BoxShapeClass_Oval, BoxShapeClass_Parallelogram,
   CommentBox, Diamond, Ellipse, LineShape, Oval, Parallelogram, Rectangle, diamondCorners,
   parallelogramCorners, rectangleCorners,
 } from "@/hades/src/Hades/Abstract/BasicShapes";
@@ -58,7 +58,9 @@ function labelDeco(txt: string, pos: number): ArrowDecoration {
 }
 
 export function main(): void {
-  const zoom = Number(new URLSearchParams(location.search).get("zoom") ?? "1");
+  const params = new URLSearchParams(location.search);
+  const zoom = Number(params.get("zoom") ?? "1");
+  const ox = Number(params.get("ox") ?? "0"), oy = Number(params.get("oy") ?? "0");
   const win = Gtk.applicationWindowNew(null);
   Gtk.windowSetTitle(win, "Hades.GI.BasicShapes demo");
   const da = Gtk.drawingAreaNew();
@@ -87,7 +89,7 @@ export function main(): void {
   const picture: HadesRender = (env) => {
     // Row 1: GSN-style boxes.
     const goal = box(20, 20, 180, 110);
-    gsnBox(drawPolygon(rectangleCorners(Rectangle(goal))), goal, "G1: Goal", body)(env);
+    gsnBox(drawPolygon(rectangleCorners(Rectangle(goal))), BoxShapeClass_Rectangle.shapeInnerBox(Rectangle(goal)), "G1: Goal", body)(env);
     for (const p of [Point(20, 20), Point(180, 20), Point(20, 110), Point(180, 110), Point(100, 20)]) handle(p).viewDraw(env);
 
     const strat = Parallelogram(box(240, 20, 380, 90));
@@ -114,7 +116,7 @@ export function main(): void {
 
     const red = box(410, 150, 560, 230);
     withLineColour(C.sRGB24(220, 30, 30), drawPolygon(rectangleCorners(Rectangle(red))))(env);
-    textBlock("Red border", ["withLineColour changes the border.", "Second description paragraph."], red)(env);
+    textBlock("Red border", ["withLineColour changes the border.", "Second description paragraph."], BoxShapeClass_Rectangle.shapeInnerBox(Rectangle(red)))(env);
 
     const [border, fill] = basicBox(1, C.sRGB24(0, 100, 0), C.sRGB24(200, 240, 200));
     const green = box(610, 150, 890, 260);
@@ -163,6 +165,7 @@ export function main(): void {
   Gtk.onWidgetDraw(da, (cr: Cairo.Context) => {
     Gtk.renderBackground(da, cr, 0, 0, 4000, 4000);
     Cairo.scale(cr, zoom, zoom);
+    Cairo.translate(cr, -ox, -oy);
     renderWithHades(cr, style, picture);
     return true;
   });

@@ -172,8 +172,17 @@ export function atomicallySync<A>(stm: STM<A>): A {
   throw new BlockedIndefinitelyOnSTM("atomicallySync: the transaction would block (retry)");
 }
 
-/** Run an STM operation in the current transaction, or as its own transaction. */
-function inTx<A>(f: () => A): A {
+/** True while a transaction is running. */
+export function inTransaction(): boolean {
+  return current !== null;
+}
+
+/**
+ * Run an STM action in the current transaction, or as a transaction of its own (with
+ * `atomicallySync`) when called outside one. Use it to make a first-class `STM` value callable
+ * from both places, as the primitives here are.
+ */
+export function inTx<A>(f: STM<A>): A {
   return current === null ? atomicallySync(f) : f();
 }
 

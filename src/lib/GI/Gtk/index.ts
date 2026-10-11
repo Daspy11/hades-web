@@ -38,6 +38,10 @@ export function cellLayoutAddAttribute(l: CellLayout, cell: CellRenderer, prop: 
   if (l instanceof ComboBox) comboCellLayoutAddAttribute(l, cell, prop, col);
   else colAddAttribute(l, cell, prop, col);
 }
+/** `cellLayoutGetCells` for a tree view column or a combo box. */
+export function cellLayoutGetCells(l: CellLayout): CellRenderer[] {
+  return (l instanceof ComboBox ? l.layout : l).cells.map((p) => p.cell);
+}
 /** `Data.GI.Gtk.ModelView.cellLayoutSetAttributes`. */
 export function mvCellLayoutSetAttributes<A>(l: CellLayout, cell: CellRenderer, model: TreeModel, f: (row: A) => Record<string, unknown>): void {
   if (l instanceof ComboBox) {

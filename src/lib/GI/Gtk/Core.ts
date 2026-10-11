@@ -481,10 +481,10 @@ export function toWidget<W extends Widget>(w: W): Widget {
   return w;
 }
 /** `castTo`: dynamic downcast. */
-export function castTo<W extends Widget>(cls: abstract new (...args: any[]) => W, w: GObject | null): W | null {
+export function castTo<W extends GObject>(cls: abstract new (...args: any[]) => W, w: GObject | null): W | null {
   return w instanceof cls ? w : null;
 }
-export function unsafeCastTo<W extends Widget>(cls: abstract new (...args: any[]) => W, w: GObject): W {
+export function unsafeCastTo<W extends GObject>(cls: abstract new (...args: any[]) => W, w: GObject): W {
   if (w instanceof cls) return w;
   throw new Error(`unsafeCastTo: object is not a ${cls.name}`);
 }

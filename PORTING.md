@@ -419,6 +419,7 @@ module that imports `GI.*`.** Summary of the rules:
 | `GI.Gio` | `import * as Gio from "@/lib/GI/Gio"` |
 | `GI.Cairo.Render` (+ `.Connector`, `GI.Cairo`) | `import * as Cairo from "@/lib/GI/Cairo"` |
 | `GI.Pango`, `GI.PangoCairo` | `import * as Pango from "@/lib/GI/Pango"` |
+| `GI.Rsvg` | `import * as SVG from "@/lib/GI/Rsvg"` (dimensions via DOMParser; drawn through a `Gdk.Pixbuf`, repaint on `Gdk.onImagesLoaded`) |
 | `Gtk.new Gtk.X [#a := v]` / `Gtk.set w [#a := v]` / `Gtk.get w #a` | `Gtk.new_(Gtk.X, { a: v })` / `Gtk.set(w, { a: v })` / `w.a` (or the `xGetA` function) |
 | `Gtk.on w #sig f` / `Gtk.after w #sig f` | the named `Gtk.onXSig` / `Gtk.afterXSig` function, or `w.connect("sig", f[, true])` |
 | `Maybe w` widget argument | `w \| null` |
@@ -592,3 +593,20 @@ Decisions made while porting that other modules depend on. Read before importing
   `verticalAxis`, `tableOutput`, `tableValues` are constants.
 * AutoMonad: `catchAutoT` handlers are lexically scoped (try/catch), unlike the Haskell CPS
   version where the handler stays installed after the protected block; unobservable in HADES.
+
+### Hades.GI.BasicShapes (H1)
+
+* `HadesEnv = { style, cr }`, `HadesRender<A = void> = (env) => A`; run with
+  `runHadesRender(act, style, cr)` or `renderWithHades(ctx, style, r)`. Haskell `local f act` on
+  the style → `local(f, act)`. `lift x` (a Cairo action) → `x(env.cr)` / `x(env)` for HadesRender.
+* `HadesLayout<A = void> = (env, st: StateCell<[BoundBox, number]>) => A`;
+  `evalHadesLayout(act, s)` / `runHadesLayout(act, s)` return a `HadesRender`. Nested layout calls:
+  `layoutTitle(Nothing, t)(env, st)`. Text layout modifiers: `(layout) => HadesLayout`.
+* Shape functions return actions: `drawPolygon(pts)(env)`; `viewDraw: drawEllipse(e)`. Constants
+  `stroke`, `fillBox`, `layoutBox`, `layoutLine`, `layoutParagraphGap`, `layoutHLine` are actions.
+* `squareHandle(d, menu, p0, evh)` is a Delta generator matching `Handle<V>`.
+* `HadesStyle`, `ArrowHead`, `ArrowDecoration` records with constructors; `RGB = [r, g, b]`;
+  `hadesToPango`/`pangoToHades` exported.
+* Pixbufs and SVGs draw nothing until loaded; widgets showing them must repaint on
+  `Gdk.onImagesLoaded` (Rendering does). `Pango.fallbackMeasurer` is used when no canvas exists
+  (jsdom tests).

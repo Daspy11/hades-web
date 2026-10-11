@@ -127,6 +127,12 @@ Data files from the original `share` directories are bundled. Use
 * Pango: `Pango.createContext(cr)` (PangoCairo), then `Pango.layoutNew(ctx)`,
   `layoutSetText`, `layoutSetMarkup`, `layoutSetWidth` (in Pango units), `layoutGetExtents`, and
   `Pango.showLayout(cr, layout)`.
+* SVG images (`GI.Rsvg`): `import * as SVG from "@/lib/GI/Rsvg"`. `SVG.handleNewFromStreamSync(bytes,
+  null, flags, null)` (or `handleNewFromData`) parses the document and its intrinsic dimensions
+  synchronously; `handleRenderDocument(h, cr, viewport)` draws it once the browser has decoded
+  it (`Gdk.onImagesLoaded` fires then). `GI.new SVG.Rectangle [...]` is `SVG.rectangleNew({...})`.
+* Without a 2D canvas (unit tests under jsdom) Pango measures text with the deterministic
+  `Pango.fallbackMeasurer`, so layout code can be tested.
 * `Gtk.renderBackground(styleContext, cr, x, y, w, h)` paints the widget's CSS background, so
   the `hades-diagram` and `active-diagram` classes work.
 * Offscreen surfaces for export are `Cairo.withImageSurface`, `withSVGSurface`,
