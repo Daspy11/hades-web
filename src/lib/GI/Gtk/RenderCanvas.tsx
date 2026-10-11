@@ -7,6 +7,7 @@ import { baseProps, useWidget, type LayoutStyle } from "./Render";
 import type { DrawingArea } from "./Widgets";
 import { Context } from "../Cairo";
 import { eventKeyFromDom, modifiersOf, onImagesLoaded, type EventButton, type EventScroll } from "../Gdk";
+import { handleAccelerator } from "./RenderRoot";
 
 export function DrawingAreaView({ w, layout }: { w: DrawingArea; layout?: LayoutStyle }) {
   useWidget(w);
@@ -138,6 +139,9 @@ export function DrawingAreaView({ w, layout }: { w: DrawingArea; layout?: Layout
       onMouseMove={onMouseMove}
       onContextMenu={(e) => e.preventDefault()}
       onKeyDown={(e) => {
+        // GTK windows activate accelerators before the focus widget sees the key.
+        handleAccelerator(e.nativeEvent);
+        if (e.nativeEvent.defaultPrevented) return;
         if (w.emit("key-press-event", eventKeyFromDom(e.nativeEvent)) === true) {
           e.preventDefault();
           e.stopPropagation();

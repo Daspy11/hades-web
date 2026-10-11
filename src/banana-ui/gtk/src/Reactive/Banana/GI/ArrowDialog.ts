@@ -2527,7 +2527,8 @@ function renderGadget_ClickableList(wInit: WInit, initial: GD, e: B.Event<GD>, b
     stop1();
     stop2();
   });
-  const mouseEvent = registerIOSignal1(evBox, Gtk.onWidgetButtonPressEvent, (ev: Gdk.EventButton) => {
+  type Click = readonly [number, ClickableItem<any>];
+  const mouseEvent = registerIOSignal1(evBox, Gtk.onWidgetButtonPressEvent, (ev: Gdk.EventButton): readonly [boolean, Maybe<Click>] => {
     const [lx, ly] = Gtk.labelGetLayoutOffsets(label);
     const t = Gdk.getEventButtonType(ev);
     const btn = Gdk.getEventButtonButton(ev);
@@ -2536,16 +2537,15 @@ function renderGadget_ClickableList(wInit: WInit, initial: GD, e: B.Event<GD>, b
     const item = getLabelItem(label, clickMapRef, posn1);
     if (item.tag === "Just") {
       if (btn === 1) {
-        if (t === Gdk.EventTypeButtonPress) return [true, Just([1, item.value] as const)] as const; // Single click
-        if (t === Gdk.EventType2buttonPress) return [true, Just([2, item.value] as const)] as const; // Double click
-        return [false, Nothing] as const;
+        if (t === Gdk.EventTypeButtonPress) return [true, Just([1, item.value])]; // Single click
+        if (t === Gdk.EventType2buttonPress) return [true, Just([2, item.value])]; // Double click
+        return [false, Nothing];
       }
-      if (btn === 3 && t === Gdk.EventTypeButtonPress) return [true, Just([3, item.value] as const)] as const; // Right click.
-      return [false, Nothing] as const;
+      if (btn === 3 && t === Gdk.EventTypeButtonPress) return [true, Just([3, item.value])]; // Right click.
+      return [false, Nothing];
     }
-    return [false, Nothing] as const;
+    return [false, Nothing];
   });
-  type Click = readonly [number, ClickableItem<any>];
   const mouseEvent1 = B.filterJust(mouseEvent);
   const singleClickEvent = B.mapE((c: Click) => c[1].clickSingle, B.filterE((c: Click) => c[0] === 1, mouseEvent1));
   const doubleClickEvent = B.mapE((c: Click) => c[1].clickDouble, B.filterE((c: Click) => c[0] === 2, mouseEvent1));
@@ -2688,7 +2688,7 @@ function renderGadget_TreeSelector(
   wInit: WInit, env: any, initial: GD, e: B.Event<GD>, b: B.Behavior<GD>,
   forestF: (e: any) => Forest<SelectorItem>,
 ): Out {
-  const selectionFunc = (tbl: M.Map<readonly number[], any>) =>
+  const selectionFunc = (tbl: M.Map<number[], any>) =>
     (_sel: Gtk.TreeSelection, _model: Gtk.TreeModel, path: Gtk.TreePath, old: boolean): boolean => {
       const p2 = Gtk.treePathGetIndices(path) ?? [];
       const r = M.member(p2, tbl) || old; // Always allow deselection
@@ -2809,7 +2809,7 @@ function renderGadget_TreeSelector(
 
 function renderGadget_Table(
   iconTheme: Gtk.IconTheme, wInit: WInit, initial: GD, envC: Changes<any>, e: B.Event<GD>, b: B.Behavior<GD>,
-  flags: readonly TableEditing<any>[], columns: Table<any>, nested: Maybe<DialogSelector_<any, any, any>>,
+  flags: readonly Tbl.TableEditing<any>[], columns: Tbl.Table<any>, nested: Maybe<DialogSelector_<any, any, any>>,
 ): Out {
   const [vw, store, activated, userEdit] = mkTableView(
     iconTheme,

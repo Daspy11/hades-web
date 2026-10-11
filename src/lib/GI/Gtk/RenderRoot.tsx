@@ -350,7 +350,12 @@ function ToplevelView({ w }: { w: Widget }) {
   return null;
 }
 
-function handleAccelerator(e: KeyboardEvent): void {
+/**
+ * Activate the window accelerator for a key event, if there is one (and prevent the browser
+ * default). Exported so that widgets which consume key events themselves (the drawing area) can
+ * give accelerators priority, as GTK windows do.
+ */
+export function handleAccelerator(e: KeyboardEvent): void {
   if (e.defaultPrevented) return;
   const accel = accelOfEvent(e);
   if (!accel.includes("+") && !/^f\d+$/.test(accel)) return;
