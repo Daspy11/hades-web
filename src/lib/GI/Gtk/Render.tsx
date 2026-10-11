@@ -429,6 +429,10 @@ function ScrolledWindowView({ w, layout }: { w: W.ScrolledWindow; layout?: Layou
     flexDirection: "column",
     position: "relative",
     ...layout,
+    // An explicit min-content size is a hard minimum, also inside containers that pass
+    // `minHeight: 0` for flex shrinking (e.g. notebook pages).
+    ...(w.minContentHeight >= 0 ? { minHeight: w.minContentHeight } : {}),
+    ...(w.minContentWidth >= 0 ? { minWidth: w.minContentWidth } : {}),
   };
   const props = baseProps(w, w.shadow === "ShadowTypeNone" ? "" : "frame", style);
   return (
@@ -1078,7 +1082,9 @@ function ComboBoxView({ w, layout }: { w: ComboBox; layout?: LayoutStyle }) {
   const props = baseProps(w, "", layout);
   return (
     <Select.Root
-      value={w.active >= 0 ? String(w.active) : undefined}
+      // "" (not undefined) for no selection: Radix shows the placeholder and the Select stays
+      // controlled when an item is chosen later.
+      value={w.active >= 0 ? String(w.active) : ""}
       onValueChange={(v) => w.setActive(parseInt(v, 10), true)}
       disabled={!w.sensitive}
     >

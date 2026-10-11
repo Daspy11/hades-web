@@ -62,7 +62,9 @@
  *   called directly.
  * * `elmerStatic` and `elmerScotty` (Scotty routes) act at once: `elmerStatic` registers the icons,
  *   `elmerScotty` loads the client libraries and mounts the page's @main@ element into a DOM
- *   container (default `document.body`), then runs the GUI. See their comments.
+ *   container (default `document.body`), then runs the GUI. See their comments. The URLs that
+ *   the original static server answered (@/favicon.ico@, @/icons/:icon@, @/assets/...@) are
+ *   resolved to bundled files by the web-only `elmerStaticUrl`.
  */
 import * as J from "@/lib/Data/Aeson";
 import * as M from "@/lib/Data/Map";
@@ -116,7 +118,7 @@ import {
 } from "@/lib/Network/JavaScript";
 import * as H from "@/lib/Text/Blaze/Html5";
 import * as HA from "@/lib/Text/Blaze/Html5/Attributes";
-import { getDataFileName } from "@/lib/System/Paths";
+import { dataFileExists, getDataFileName } from "@/lib/System/Paths";
 import { uuidStreamIO } from "@/banana-ui/base/Data/UUID/Generate";
 import type { TState } from "@/banana-ui/webits/src/Control/Concurrent/TState";
 import { iconUrl, scottyIcons, IconGroup, type IconName } from "@/banana-ui/webits/src/Network/Webits/Icons";
@@ -657,18 +659,34 @@ function loadScript(src: string, timeoutMs = 15000): Promise<void> {
   });
 }
 
-/** Add a stylesheet link to the page. */
-function loadStylesheet(href: string): void {
-  const l = document.createElement("link");
-  l.rel = "stylesheet";
-  l.href = href;
-  document.head.appendChild(l);
+/**
+ * Web: resolve a URL of the original web server's static routes (see 'elmerStatic':
+ * @/favicon.ico@, @/icons/:icon@ and @/assets/...@, also relative to the page as
+ * @assets/...@) to the URL of the bundled file. Other URLs, and files that do not exist, are
+ * returned unchanged.
+ */
+export function elmerStaticUrl(url: string): string {
+  if (url.startsWith("//") || /^[a-z][a-z0-9+.-]*:/i.test(url)) return url;
+  const path = url.replace(/^(\.\/|\/)/, "");
+  if (path === "favicon.ico") return getDataFileName("webits", "JS/favicon.ico");
+  if (path.startsWith("icons/")) {
+    const u = iconUrl(path.slice("icons/".length));
+    return u.startsWith("/icons/") ? url : u;
+  }
+  if (path.startsWith("assets/")) {
+    // Some JS files are requested without a suffix. Hence we check both.
+    const rest = path.slice("assets/".length);
+    for (const suffix of ["", ".js"]) {
+      if (dataFileExists("webits", rest + suffix)) return getDataFileName("webits", rest + suffix);
+    }
+  }
+  return url;
 }
 
 /**
  * Put rendered @head@ markup into the page: a nested @head@ is unwrapped, @title@ sets the
  * document title, scripts are loaded and run in order, and other elements are appended to the
- * page's @head@.
+ * page's @head@. @src@ and @href@ attributes go through 'elmerStaticUrl'.
  */
 async function injectHead(html: string): Promise<void> {
   const tpl = document.createElement("template");
@@ -676,6 +694,10 @@ async function injectHead(html: string): Promise<void> {
   const place = async (nodes: readonly Node[]): Promise<void> => {
     for (const n of nodes) {
       if (!(n instanceof Element)) continue;
+      for (const attr of ["src", "href"]) {
+        const v = n.getAttribute(attr);
+        if (v !== null) n.setAttribute(attr, elmerStaticUrl(v));
+      }
       const tag = n.tagName.toLowerCase();
       if (tag === "head") await place([...n.childNodes]);
       else if (tag === "title") document.title = n.textContent ?? "";
@@ -708,6 +730,8 @@ async function injectHead(html: string): Promise<void> {
  *
  * Web: there is no server. The icons are registered for `iconUrl` and the favicon is set (see
  * `scottyIcons`); the data files are bundled by Vite and found with `getDataFileName("webits", ...)`.
+ * 'elmerStaticUrl' resolves URLs of these routes (it is applied to the @htmlHead@ of
+ * 'elmerScotty').
  */
 export function elmerStatic(iconGroups: readonly IconGroup[]): void {
   scottyIcons(iconGroups);
@@ -723,8 +747,8 @@ export type RoutePattern = string;
  * Typically the return value will be a "TVar", "TChan" or similar STM communication primitive.
  *
  * Web: the page is this page. `elmerScotty` does what loading the original page did: it puts
- * @htmlHead@ and the client libraries (jQuery, jQuery UI and its theme, Fancytree from its CDN,
- * AppendGrid, @JS/arrowDialog.js@) and the standard stylesheet into the document head, creates
+ * @htmlHead@ and the client libraries (jQuery, jQuery UI and its theme, Fancytree and its win8
+ * skin, AppendGrid, @JS/arrowDialog.js@) and the standard stylesheet into the document head, creates
  * the @main@ @div@ in `container` (default `document.body`), installs the client side of the
  * JavaScript bridge with `jsb.debug` on, and then runs `action` against a fresh `ElmerEnv`. The
  * `route` is not used: a single page application has one page. AppendGrid is loaded from the
@@ -752,17 +776,24 @@ export async function elmerScotty(
   // baseServer: the page.
   await injectHead(H.renderHtml(htmlHead));
   // Import bundled Fancytree core, jQuery and associated CSS.
-  loadStylesheet("https://cdn.jsdelivr.net/npm/jquery.fancytree@2.38/dist/skin-win8/ui.fancytree.min.css");
+  // Web: Fancytree 2.38 (the original's "//cdn.jsdelivr.net/npm/jquery.fancytree@2.38/dist/
+  // skin-win8/ui.fancytree.min.css" and ".../dist/jquery.fancytree-all.min.js") is bundled in
+  // JS/fancytree, so the page also works offline. The stylesheets are imported through Vite so
+  // that their image references are bundled too.
+  await import("@/banana-ui/webits/JS/fancytree/skin-win8/ui.fancytree.min.css");
   await import("@/banana-ui/webits/JQuery/jquery-ui.min.css");
   await loadScript(getDataFileName("webits", "JQuery/external/jquery/jquery.js"));
   await loadScript(getDataFileName("webits", "JQuery/jquery-ui.min.js"));
-  await loadScript("https://cdn.jsdelivr.net/npm/jquery.fancytree@2.38/dist/jquery.fancytree-all.min.js");
-  // H.script ! HA.type_ "module" ! HA.src "/assets/JS/AppendGrid-dev.js" $ ""
+  await loadScript(getDataFileName("webits", "JS/fancytree/jquery.fancytree-all.min.js"));
+  // The original: -- H.script ! HA.src "/assets/JS/AppendGrid.js" $ ""   (commented out)
+  //               H.script ! HA.type_ "module" ! HA.src "/assets/JS/AppendGrid-dev.js" $ ""
   await loadScript(getDataFileName("webits", "JS/AppendGrid.js"));
   await loadScript(getDataFileName("webits", "JS/arrowDialog.js"));
   await injectHead(H.renderHtml(standardHeader));
   // The page script: window.jsb = {ws: ...}; jsb.debug=true;
   (globalThis as unknown as { jsb: { debug: boolean } }).jsb = { debug: true };
+  // H.noscript "Sorry, but this application requires JavaScript to be enabled."
+  // (Web: this code is JavaScript, so the noscript message can never show; it is left out.)
   const main = document.createElement("div");
   main.id = mainName;
   container.appendChild(main);

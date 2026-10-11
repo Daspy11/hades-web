@@ -1,6 +1,7 @@
 /**
  * Scratch demo for the banana-ui GTK modules ported by agent G1 (`?demo=g1`): an editable table
- * (`mkTableView`), a tree table (`mkTreeTableView`) and a popup menu (`mkGtkMenu`).
+ * (`mkTableView`, every kind of cell editor), a tree table (`mkTreeTableView`), a popup menu
+ * (`mkGtkMenu`/`popupMenuOn`), `eventLink`/`behaviorLink`, `widgetLinkColour` and `errorBox`.
  */
 import * as Gtk from "@/lib/GI/Gtk";
 import * as B from "@/lib/Reactive/Banana";
@@ -14,8 +15,8 @@ import {
   EditBool, EditColour, EditDate, EditEntry, EditIcon, EditNote, Opt, TableAdd, TableDelete, TableShuffle,
   enumField, mkField, type Table,
 } from "@/banana-ui/base/Reactive/Banana/Table";
-import { eventLink } from "@/banana-ui/gtk/src/Reactive/Banana/GI/Connect";
-import { registerIOSignal } from "@/banana-ui/gtk/src/Reactive/Banana/GI/Connect";
+import { behaviorLink, eventLink, registerIOSignal } from "@/banana-ui/gtk/src/Reactive/Banana/GI/Connect";
+import { errorBox } from "@/banana-ui/gtk/src/Reactive/Banana/GI/ErrorBox";
 import { mkGtkMenu, popupMenuOn } from "@/banana-ui/gtk/src/Reactive/Banana/GI/Menu";
 import { mkTableView, mkTreeTableView } from "@/banana-ui/gtk/src/Reactive/Banana/GI/Table";
 import { widgetLinkColour } from "@/banana-ui/gtk/src/Reactive/Banana/GI/Common";
@@ -41,7 +42,10 @@ const cols: Table<Row> = [
   mkField("Name", field("name"), Just((r: string) => (r.startsWith("G") ? "emblem-ok-symbolic" : "")), EditNote, Nothing),
   mkField("Count", field("count"), Nothing, EditEntry(textPrismInt), Nothing),
   mkField("Done", field("done"), Nothing, EditBool, Nothing),
-  mkField("Kind", field("kind"), Nothing, enumField<Kind>(["Goal", "Strategy", "Solution"]), Just(kindColour)),
+  mkField(
+    "Kind", field("kind"), Just((k: Kind) => (k === "Goal" ? "go-up-symbolic" : k === "Strategy" ? "view-list-symbolic" : "emblem-ok-symbolic")),
+    enumField<Kind>(["Goal", "Strategy", "Solution"]), Just(kindColour),
+  ),
   mkField("Colour", field("colour"), Nothing, EditColour, Nothing),
   mkField("Due", field("due"), Nothing, EditDate(longDate), Nothing),
   mkField("Icon", field("icon"), Nothing, EditIcon(() => true), Nothing),
@@ -77,10 +81,18 @@ export function main(): void {
   const colourEntry = Gtk.entryNew();
   Gtk.entrySetText(colourEntry, "linked colour");
   Gtk.boxPackEnd(hbox, colourEntry, false, false, 0);
+  const rowCount = Gtk.labelNew(`${rows.length} rows`);
+  Gtk.boxPackEnd(hbox, rowCount, false, false, 0);
+  const errorButton = Gtk.buttonNewWithLabel("Error box…");
+  Gtk.onButtonClicked(errorButton, () => void errorBox(errorButton, "Something went wrong.\n\nThis is a standard error dialog."));
+  Gtk.boxPackEnd(hbox, errorButton, false, false, 0);
+  const resetButton = Gtk.buttonNewWithLabel("Reset rows");
+  Gtk.boxPackEnd(hbox, resetButton, false, false, 0);
   Gtk.boxPackStart(vbox, hbox, false, false, 0);
 
   const net = B.compile(() => {
-    const [setE] = B.newEvent<readonly Row[]>();
+    // Table content updates pushed from outside (the `Event [row]` argument).
+    const setE = registerIOSignal(resetButton, Gtk.onButtonClicked, () => [null, rows] as const);
     const [box, , actE, editE] = mkTableView(
       Gtk.iconThemeGetDefault(),
       [TableAdd("Row", rows[2]), TableDelete, TableShuffle],
@@ -126,6 +138,8 @@ export function main(): void {
       ),
     );
     eventLink(status, Gtk.labelSetText, messages);
+    behaviorLink(rowCount, Gtk.labelSetText,
+      B.stepper(`${rows.length} rows`, B.mapE((rs: Row[]) => `${rs.length} rows`, editE)));
     const colourB = B.stepper<Maybe<C.Colour>>(Just(C.sRGB24(40, 60, 160)), B.mapE((rs: Row[]) => Just(rs[0]?.colour ?? C.white), editE));
     widgetLinkColour(colourEntry, Just(C.sRGB24(40, 60, 160)), B.never(), colourB);
   });

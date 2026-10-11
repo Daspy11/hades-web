@@ -13,6 +13,8 @@
  * | `H.div $ do a; b`                         | `H.div(a, b)` (children: `Html` or text strings)  |
  * | `H.div ! HA.id "x" ! HA.class_ "y" $ c`   | `with_(H.div(c), HA.id("x"), HA.class_("y"))`     |
  * | `H.img ! HA.src u`                        | `with_(H.img(), HA.src(u))`                       |
+ * | `H.th ! HA.rowspan "2"` (a function)      | `with_(H.th, HA.rowspan("2"))` (a function)       |
+ * | `h !? (cond, attr)`                       | `withIf(h, [cond, attr])`                         |
  * | `"literal"` as `Html` (OverloadedStrings) | a string child, or `text("literal")`             |
  * | `do { a; b }`, `mconcat`, `mapM_`         | `mconcat_Html([a, b])`, `append_Html(a, b)`       |
  * | `return ()` / `mempty`                    | `mempty_Html`                                    |
@@ -77,6 +79,10 @@ export function preEscapedTextValue(t: string): AttributeValue {
 }
 export const preEscapedStringValue = preEscapedTextValue;
 export const preEscapedLazyTextValue = preEscapedTextValue;
+/** `preEscapedToValue`: a raw attribute value from text, a number or a boolean. */
+export function preEscapedToValue(v: string | number | boolean): AttributeValue {
+  return new AttributeValue(showValue(v), true);
+}
 /** `toValue`: an attribute value from text, a number or a boolean. */
 export function toValue(v: string | number | boolean): AttributeValue {
   return new AttributeValue(showValue(v), false);
@@ -93,6 +99,8 @@ export type HtmlNode =
       readonly attrs: readonly Attribute[];
       /** `null` for a leaf element (`<img>`, `<br>`, ...), which has no closing tag. */
       readonly children: Html | null;
+      /** A leaf rendered XML style, `<name ... />` (`customLeaf name True`). */
+      readonly close: boolean;
     }
   | { readonly tag: "Text"; readonly text: string }
   | { readonly tag: "Raw"; readonly html: string };
@@ -125,21 +133,38 @@ export function mconcat_Html(hs: readonly HtmlLike[]): Html {
   return new Html(hs.flatMap((h) => [...toNodes(h)]));
 }
 
-/** Haskell `(!)`: add attributes to every top-level element of the markup. */
-export function with_(h: HtmlLike, ...attrs: readonly Attribute[]): Html {
+/** An element constructor taking children, such as `H.div` or `H.th`. */
+export type HtmlFunction = (...children: readonly HtmlLike[]) => Html;
+
+/**
+ * Haskell `(!)`: add attributes to every top-level element of the markup.
+ *
+ * As blaze's `Attributable` instance for functions, `with_` also accepts an element function and
+ * returns one: `(H.th ! HA.rowspan "2") . H.text` is
+ * `(t) => with_(H.th, HA.rowspan("2"))(H.text(t))`.
+ */
+export function with_(h: HtmlLike, ...attrs: readonly Attribute[]): Html;
+export function with_(h: HtmlFunction, ...attrs: readonly Attribute[]): HtmlFunction;
+export function with_(h: HtmlLike | HtmlFunction, ...attrs: readonly Attribute[]): Html | HtmlFunction {
+  if (typeof h === "function") return (...children) => with_(h(...children), ...attrs);
   return new Html(
     toNodes(h).map((n) => (n.tag === "Element" ? { ...n, attrs: [...n.attrs, ...attrs] } : n)),
   );
 }
 
+/** Haskell `(!?)`: add the attribute only if the condition holds (`h !? (cond, attr)`). */
+export function withIf(h: HtmlLike, [cond, attr]: readonly [boolean, Attribute]): Html {
+  return cond ? with_(h, attr) : toHtml(h);
+}
+
 /** An element with children (`Text.Blaze.Internal.Parent`). */
 export function parent(name: string, children: readonly HtmlLike[]): Html {
-  return new Html([{ tag: "Element", name, attrs: [], children: mconcat_Html(children) }]);
+  return new Html([{ tag: "Element", name, attrs: [], children: mconcat_Html(children), close: false }]);
 }
 
 /** An element without closing tag (`Text.Blaze.Internal.Leaf`). */
 export function leaf(name: string): Html {
-  return new Html([{ tag: "Element", name, attrs: [], children: null }]);
+  return new Html([{ tag: "Element", name, attrs: [], children: null, close: false }]);
 }
 
 /** `customParent`: an element with any tag name and children. */
@@ -147,9 +172,9 @@ export function customParent(tagName: string, ...children: readonly HtmlLike[]):
   return parent(tagName, children);
 }
 
-/** `customLeaf tag close`: an element without children. (`close` is ignored for HTML.) */
-export function customLeaf(tagName: string, _close = false): Html {
-  return leaf(tagName);
+/** `customLeaf tag close`: an element without children, ending in ` />` if `close` is true. */
+export function customLeaf(tagName: string, close: boolean): Html {
+  return new Html([{ tag: "Element", name: tagName, attrs: [], children: null, close }]);
 }
 
 function showValue(v: string | number | boolean): string {
@@ -212,7 +237,7 @@ function renderNodes(nodes: readonly HtmlNode[], out: string[]): void {
         for (const a of n.attrs) {
           out.push(" ", a.name, '="', a.value.preEscaped ? a.value.text : escapeHtml(a.value.text), '"');
         }
-        out.push(">");
+        out.push(n.children === null && n.close ? " />" : ">");
         if (n.children !== null) {
           renderNodes(n.children.nodes, out);
           out.push("</", n.name, ">");

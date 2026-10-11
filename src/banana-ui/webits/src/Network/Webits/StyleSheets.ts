@@ -23,7 +23,11 @@ import * as H from "@/lib/Text/Blaze/Html5";
 /** A stylesheet (the CSS text rendered by Clay). */
 export type Css = string;
 
-/** A standard CSS file. Applications can override this as they see fit. */
+/**
+ * A standard CSS file. Applications can override this as they see fit.
+ *
+ * (The Clay source of @.tab-form@ also has a commented-out @-- borderTop none none none@.)
+ */
 export const webitStdCss: Css = `* {
   font-family: "Roboto", sans-serif;
 }

@@ -6,8 +6,11 @@
  * Elements with content take their children as arguments: `H.div(a, b)` is
  * `H.div $ do { a; b }`; a string child is escaped text. Leaf elements (`img`, `br`, `input`,
  * `link`, `meta`, `hr`, ...) take no arguments: `H.img()`.
+ *
+ * The element set is that of blaze-html 0.9 `Text.Blaze.Html5`. Names that are reserved or clash
+ * get a trailing underscore: `p_` (also exported as `p`), `var_`.
  */
-import { leaf, parent, preEscapedText, type Html, type HtmlLike } from "./Html";
+import { leaf, mconcat_Html, parent, preEscapedText, type Html, type HtmlLike } from "./Html";
 
 export * from "./Html";
 
@@ -19,9 +22,9 @@ const l = (name: string): (() => Html) => () => leaf(name);
 export function docType(): Html {
   return preEscapedText("<!DOCTYPE HTML>\n");
 }
-/** `docTypeHtml`: the doctype followed by an `html` element. */
+/** `docTypeHtml inner = docType >> html inner`: the doctype followed by an `html` element. */
 export function docTypeHtml(...children: readonly HtmlLike[]): Html {
-  return parent("html", [docType(), ...children]);
+  return mconcat_Html([docType(), parent("html", children)]);
 }
 
 export const a: P = p("a");
@@ -44,6 +47,7 @@ export const cite: P = p("cite");
 export const code: P = p("code");
 export const col = l("col");
 export const colgroup: P = p("colgroup");
+export const command = l("command");
 export const datalist: P = p("datalist");
 export const dd: P = p("dd");
 export const del: P = p("del");
@@ -76,17 +80,21 @@ export const img = l("img");
 export const input = l("input");
 export const ins: P = p("ins");
 export const kbd: P = p("kbd");
+export const keygen = l("keygen");
 export const label: P = p("label");
 export const legend: P = p("legend");
 export const li: P = p("li");
 export const link = l("link");
 export const main: P = p("main");
+export const map: P = p("map");
 export const mark: P = p("mark");
 export const menu: P = p("menu");
+export const menuitem = l("menuitem");
 export const meta = l("meta");
 export const meter: P = p("meter");
 export const nav: P = p("nav");
 export const noscript: P = p("noscript");
+export const object: P = p("object");
 export const ol: P = p("ol");
 export const optgroup: P = p("optgroup");
 export const option: P = p("option");
@@ -97,6 +105,10 @@ export const param = l("param");
 export const pre: P = p("pre");
 export const progress: P = p("progress");
 export const q: P = p("q");
+export const rp: P = p("rp");
+export const rt: P = p("rt");
+export const ruby: P = p("ruby");
+export const s: P = p("s");
 export const samp: P = p("samp");
 export const script: P = p("script");
 export const section: P = p("section");

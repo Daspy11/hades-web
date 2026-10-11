@@ -7,7 +7,8 @@
 import { describe, expect, it } from "vitest";
 import * as FM from "@/banana-ui/webits/src/Data/ForestModel";
 import * as T from "@/lib/Data/Tree";
-import { view, from } from "@/lib/Control/Lens";
+import { view, from, over, preview } from "@/lib/Control/Lens";
+import { Just, Nothing } from "@/lib/Data/Maybe";
 import type { StateCell } from "@/lib/Control/Lens";
 
 type Forest = T.Forest<number>;
@@ -198,6 +199,7 @@ describe("testProperties", () => {
     const x = [g.tree(size), ...g.forest(size)];
     const mdl1 = view(FM.modelIso<number>(), x);
     const keys = FM.evalEdit(FM.getForestIndices, mdl1).flatMap(T.flatten);
+    // traceM $ "keys = " <> show keys   (debug output of the original, left out)
     const n1 = g.elements(keys);
     const ins = g.elements(insertions);
     const n2 = g.elements([FM.rootIndex, ...keys]);
@@ -226,6 +228,14 @@ describe("Model Eq instance", () => {
     expect(FM.evalEdit((st) => FM.isStrictDescendantOf(st, 1, 1), testModel)).toBe(false);
     expect(FM.evalEdit((st) => FM.isDescendantOf(st, 5, 1), testModel)).toBe(false);
     expect(FM.evalEdit((st) => FM.isDescendantOf(st, 99, FM.rootIndex), testModel)).toBe(false);
+  });
+
+  it("ix_Model (the Ixed instance) focuses on the value at an index", () => {
+    expect(preview(FM.ix_Model<number>(4), testModel)).toEqual(Just(4));
+    expect(preview(FM.ix_Model<number>(42), testModel)).toEqual(Nothing);
+    const m = over(FM.ix_Model<number>(2), (v) => v + 100, testModel);
+    expect(FM.evalEdit((st) => FM.getItem(st, 2), m)).toBe(102);
+    expect(FM.eq_Model(over(FM.ix_Model<number>(42), (v) => v + 1, testModel), testModel)).toBe(true);
   });
 
   it("mapWithIndex and ix", () => {

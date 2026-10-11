@@ -118,6 +118,8 @@ export function getIconData(path: FilePath): IconGroup[] {
     else if (iconFiles1.includes(pngFile)) return Just(IconData(p + "/" + pngFile, "IconPng"));
     else return Nothing;
   };
+  // Web: only the sub-directories are listed. (In Haskell a plain file here would make the
+  // 'listDirectory' of its "group" fail; the bundled icon trees contain none.)
   const pathContents = listDirectory(path).dirs;
   return pathContents.map((groupDir) => {
     const groupName = T.toTitle(T.pack(groupDir));

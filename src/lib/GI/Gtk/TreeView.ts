@@ -7,6 +7,8 @@ import {
   TreeModel, TreeModelSort, TreePath, TreeIter, RowNode, type GValue, toGValue, type SeqStore, type ForestStore,
 } from "./TreeModel";
 import { Entry } from "./Widgets";
+// Circular import (Choosers uses this module): only used at run time, inside methods.
+import { ComboBox } from "./Choosers";
 import type { EventButton, DragContext } from "../Gdk";
 
 // ---------------------------------------------------------------------------------------------
@@ -73,14 +75,19 @@ export function clearCellRendererTextBackground(c: CellRendererText): void {
 export function cellRendererStopEditing(c: CellRenderer, canceled: boolean): void {
   c.emit("__stop-editing", canceled);
 }
-export function cellEditableEditingDone(e: Entry): void {
+/**
+ * `GtkCellEditable`: the widget a cell is edited with. As in GTK it is a `ComboBox` for a
+ * `CellRendererCombo` and an `Entry` otherwise; use `castTo` to tell them apart.
+ */
+export type CellEditable = Entry | ComboBox;
+export function cellEditableEditingDone(e: CellEditable): void {
   e.emit("editing-done");
 }
 export function onCellRendererTextEdited(c: CellRendererText, cb: (path: string, text: string) => void): SignalHandlerId {
   return c.connect("edited", cb);
 }
-/** The editable passed to the handler is an `Entry` widget. */
-export function onCellRendererEditingStarted(c: CellRenderer, cb: (editable: Entry, path: string) => void): SignalHandlerId {
+/** The editable passed to the handler is a `ComboBox` for a combo cell, an `Entry` otherwise. */
+export function onCellRendererEditingStarted(c: CellRenderer, cb: (editable: CellEditable, path: string) => void): SignalHandlerId {
   return c.connect("editing-started", cb);
 }
 export function onCellRendererEditingCanceled(c: CellRenderer, cb: () => void): SignalHandlerId {
@@ -318,7 +325,8 @@ export interface EditingState {
   readonly path: string;
   readonly column: TreeViewColumn;
   readonly cell: CellRenderer;
-  readonly entry: Entry;
+  /** The editable widget (a `ComboBox` for a combo cell). */
+  readonly entry: CellEditable;
 }
 
 export class TreeView extends Widget {
@@ -394,16 +402,44 @@ export class TreeView extends Widget {
   /** Begin editing a cell (called by the renderer). */
   startEditing(path: TreePath, column: TreeViewColumn, cell: CellRenderer, text: string): void {
     this.stopEditing(true);
-    const entry = new Entry();
-    entry.text = text;
-    entry.parent = this;
     const pathStr = path.toString();
+    // As gtk_cell_renderer_combo_start_editing: a combo cell is edited with a ComboBox over the
+    // renderer's model showing its text column, with the item matching the cell text active.
+    // Its "changed" is re-emitted by the renderer as "changed" (path, iter); "edited" carries the
+    // text of the active item.
+    let combo: ComboBox | null = null;
+    let textColumn = 0;
+    if (cell instanceof CellRendererCombo) {
+      const n = this.model?.nodeAt(path) ?? null;
+      const props = n && this.model ? computeCellProps(this.model, n, column, cell) : cell.base;
+      const m: TreeModel | null = props.model ?? null;
+      textColumn = props.textColumn ?? 0;
+      combo = new ComboBox();
+      combo.setModel(m);
+      const txt = new CellRendererText();
+      combo.layout.cells.push({ cell: txt, expand: true, end: false });
+      combo.layout.attributes.set(txt, new Map([["text", textColumn]]));
+      combo.active = m ? m.roots().findIndex((r) => String(m.columnValue(r, textColumn) ?? "") === text) : -1;
+      const cb = combo;
+      cb.connect("changed", () => {
+        const r = cb.model?.roots()[cb.active];
+        if (r && cb.model) cell.emit("changed", pathStr, cb.model.iter(r));
+      });
+    }
+    const entry: CellEditable = combo ?? new Entry();
+    if (entry instanceof Entry) entry.text = text;
+    entry.parent = this;
+    const editedText = (): string => {
+      if (entry instanceof Entry) return entry.text;
+      const r = entry.model?.roots()[entry.active];
+      return r && entry.model ? String(entry.model.columnValue(r, textColumn) ?? "") : "";
+    };
     const finish = (cancel: boolean) => {
       if (this.editing?.entry !== entry) return;
       this.editing = null;
       this.changed();
       if (cancel) cell.emit("editing-canceled");
-      else cell.emit("edited", pathStr, entry.text);
+      else cell.emit("edited", pathStr, editedText());
       entry.destroy();
     };
     entry.connect("activate", () => finish(false));

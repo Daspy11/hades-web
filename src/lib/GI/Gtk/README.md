@@ -111,7 +111,11 @@ Data files from the original `share` directories are bundled. Use
 * `cellLayoutPackStart`, `cellLayoutAddAttribute` and the other layout functions work on both
   `TreeViewColumn` and `ComboBox`.
 * Editing works as in GTK. Set `editable: true` on a `CellRendererText`, then connect
-  `onCellRendererTextEdited(cell, (pathStr, newText) => ...)`.
+  `onCellRendererTextEdited(cell, (pathStr, newText) => ...)`. The editable passed to
+  `onCellRendererEditingStarted` is a `Gtk.CellEditable`: a `ComboBox` for a `CellRendererCombo`
+  (with the renderer's model, a text cell on its `textColumn`, and its own cell layout, so
+  renderers and data functions added there are drawn in the popup), an `Entry` otherwise. Tell
+  them apart with `Gtk.castTo`.
 * Drag and drop uses HTML5 drag events. The GTK names are kept:
   `treeViewEnableModelDragSource` and `...Dest`, `widgetDragDestSet`, `onWidgetDragMotion`,
   `onWidgetDragDrop`, `onWidgetDragDataReceived`, `widgetDragDestFindTarget`,

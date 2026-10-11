@@ -30,8 +30,10 @@ import {
   WebitClass_WebitContainer,
   WebitClass_WebStatic,
   hideWebit,
+  elmerStaticUrl,
   type ElmerEnv,
 } from "./Webits";
+import { getDataFileName } from "@/lib/System/Paths";
 import { mkWebitMenu, popupMenuOn } from "./Webits/Menu";
 import { IconData, IconGroup, iconFromUrl, iconUrl, scottyIcons } from "./Webits/Icons";
 
@@ -154,6 +156,17 @@ describe("Webits on the loopback engine", () => {
     showWebit(WebitClass_Webit, env, env.elmerTop, btn);
     popupMenuOn(WebitClass_Webit, env, btn, "OnRightClick", menu);
     await settle();
+  });
+
+  it("elmerStaticUrl resolves the routes of the original static server", () => {
+    expect(elmerStaticUrl("/favicon.ico")).toBe(getDataFileName("webits", "JS/favicon.ico"));
+    expect(elmerStaticUrl("assets/JQuery/jquery-ui.min.css")).toBe(getDataFileName("webits", "JQuery/jquery-ui.min.css"));
+    // Some JS files are requested without a suffix.
+    expect(elmerStaticUrl("/assets/JS/arrowDialog")).toBe(getDataFileName("webits", "JS/arrowDialog.js"));
+    expect(elmerStaticUrl("/icons/go-up")).toBe(iconUrl("go-up"));
+    for (const u of ["/icons/no-such-icon", "/assets/nothing.js", "//cdn.example.org/x.js", "https://example.org/a.css", "page.html"]) {
+      expect(elmerStaticUrl(u)).toBe(u);
+    }
   });
 
   it("getIconChoice opens the icon dialog and returns the clicked icon", async () => {

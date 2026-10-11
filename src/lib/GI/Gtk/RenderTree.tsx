@@ -7,9 +7,10 @@ import * as Select from "@radix-ui/react-select";
 import { baseProps, keyHandler, useWidget, WidgetView, MarkupText, type LayoutStyle } from "./Render";
 import {
   TreeView, TreeViewColumn, CellRenderer, computeCellProps, treeSelectionSelectPath, treeViewConvertWidgetToBinWindowCoords,
+  cellEditableEditingDone,
 } from "./TreeView";
 import { RowNode, TreePath, TreeModel } from "./TreeModel";
-import type { IconView } from "./Choosers";
+import { ComboBox, type IconView } from "./Choosers";
 import { iconUrl } from "./IconTheme";
 import { DragContext, eventKeyFromDom, modifiersOf, type EventButton } from "../Gdk";
 import { stripMnemonic, type Widget } from "./Core";
@@ -122,7 +123,7 @@ function CellView({ v, col, cell, props, path, node, selected }: {
         </Checkbox.Root>
       );
     case "combo":
-      if (editing) return <ComboCellEditor v={v} cell={cell} props={props} path={path} />;
+      if (editing && editing.entry instanceof ComboBox) return <ComboCellEditor v={v} combo={editing.entry} props={props} />;
       return <span className="gtk-cell-text" style={style}>{String(props.text ?? "")}</span>;
     default: {
       if (editing) return <CellEditorView v={v} entry={editing.entry} />;
@@ -150,39 +151,50 @@ function CellView({ v, col, cell, props, path, node, selected }: {
   void node;
 }
 
-function ComboCellEditor({ v, cell, props, path }: { v: TreeView; cell: CellRenderer; props: Record<string, any>; path: TreePath }) {
-  const m: TreeModel | null = props.model ?? null;
-  const textCol: number = props.textColumn ?? 0;
-  const items = m ? m.roots() : [];
-  const finish = () => {
-    v.editing = null;
-    v.changed();
+/**
+ * The in-place editor of a combo cell: the `ComboBox` editable created by `startEditing`, shown
+ * open. Items are drawn with the combo's own cell layout (so renderers and data functions added
+ * in an "editing-started" handler, e.g. icons and colours, are shown, as in GTK).
+ */
+function ComboCellEditor({ v, combo, props }: { v: TreeView; combo: ComboBox; props: Record<string, any> }) {
+  useWidget(combo);
+  const items = combo.model ? combo.model.roots() : [];
+  const item = (n: RowNode): React.ReactNode => {
+    let bg: string | undefined, fg: string | undefined;
+    const parts = combo.itemProps(n).map((p, k) => {
+      if (p.visible === false) return null;
+      bg = cellBackgroundOf(p) ?? bg;
+      fg = colourOf(p, "foreground") ?? fg;
+      if (p.kind === "pixbuf") {
+        const url = p.pixbuf?.url ?? iconUrl(p.iconName ?? null, 16);
+        return url ? <img key={k} src={url} width={16} height={16} alt="" /> : <span key={k} style={{ width: 16 }} />;
+      }
+      return <span key={k}>{p.markup !== undefined && p.markup !== null ? <MarkupText markup={String(p.markup)} /> : String(p.text ?? "")}</span>;
+    });
+    return <span className="gtk-combo-item" style={{ background: bg, color: fg }}>{parts}</span>;
   };
   return (
     <Select.Root
       defaultOpen
+      value={combo.active >= 0 ? String(combo.active) : ""}
       onOpenChange={(o) => {
-        if (!o) finish();
+        // Closed without a choice: the edit is cancelled (no-op once a choice finished it).
+        if (!o) v.stopEditing(true);
       }}
       onValueChange={(val) => {
-        const i = parseInt(val, 10);
-        const n = items[i];
-        if (n && m) {
-          cell.emit("changed", path.toString(), m.iter(n));
-          cell.emit("edited", path.toString(), String(m.columnValue(n, textCol) ?? ""));
-        }
-        finish();
+        combo.setActive(parseInt(val, 10), true);
+        cellEditableEditingDone(combo);
       }}
     >
       <Select.Trigger className="gtk-comboBox gtk-cell-combo" aria-label="Choose value">
-        <Select.Value placeholder={String(props.text ?? "")} />
+        <Select.Value placeholder={String(props.text ?? "")}>{combo.active >= 0 && items[combo.active] ? item(items[combo.active]) : null}</Select.Value>
       </Select.Trigger>
       <Select.Portal>
         <Select.Content className="gtk-combo-popup" position="popper">
           <Select.Viewport>
             {items.map((n, i) => (
               <Select.Item key={i} value={String(i)} className="gtk-combo-option">
-                <Select.ItemText>{String(m!.columnValue(n, textCol) ?? "")}</Select.ItemText>
+                <Select.ItemText>{item(n)}</Select.ItemText>
               </Select.Item>
             ))}
           </Select.Viewport>

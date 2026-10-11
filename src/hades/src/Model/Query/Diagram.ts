@@ -30,9 +30,12 @@
  * * `Paint (QueryElement v)` is `HadesRender`; `Base (QueryElement v)` is `QueryScript v`, i.e.
  *   inside a Delta, `d.base` is a `ModelEditCtx<V, QueryDiagram<V>>`. It is re-read after every
  *   wait for input.
+ * * `HasId (QueryElement v)` is also available on its own as `HasId_QueryElement`.
  * * JSON: `JSON_QueryBox`, `JSON_QueryArrow` and `JSON_QueryElement` are constants (the instances
  *   are unconstrained); `JSON_QueryDiagram(cls)` and `Reflective_QueryDiagram(cls)` take the
- *   dictionary.
+ *   dictionary. `Reflective_QueryDiagram(cls).reflectiveDefaults` is evaluated lazily, and the
+ *   inputs of its default query (all the variants of @v@) are computed on first use, as in
+ *   Haskell, so the defaults of @v@ may include the default query.
  * * Constrained values become functions of the dictionary: `queryElementDialog(cls)` and
  *   `chooseQueryDialog(cls)` (dialog selector / dialog), `queryDiagramToolbar(cls)`.
  *   `queryBackgroundMenu(cls, pt)` returns the menu (`queryBackgroundMenu(cls)` returns the
@@ -55,7 +58,7 @@ import { fmapTree, type Forest } from "@/lib/Data/Tree";
 import { absurd } from "@/lib/Prelude";
 import {
   _2, _Just, at, both, contains, identity, ix, iso, lens, over, preview, prism, set, to, use, view,
-  type Iso, type Lens, type Prism, type Traversal,
+  type Iso, type Lens, type Prism,
 } from "@/lib/Control/Lens";
 import {
   ClickableItem, CloseButton, Dialog, OkApplyButton, accum, arr, box, buttonBar, clickableList,
@@ -66,7 +69,7 @@ import {
 import { Menu, append_Menu, mempty_Menu, menuItem } from "@/banana-ui/base/Reactive/Banana/Menu";
 import { cannotHappen } from "@/banana-ui/gtk/src/Reactive/Banana/GI/ErrorBox";
 import {
-  type Action, type BoundBox, type ConnectorEnd, type Delta, type DeltaCtx, type DiagramId, type LineShape,
+  type Action, type BoundBox, type ConnectorEnd, type Delta, type DeltaCtx, type DiagramId, type HasId, type LineShape,
   type Point, type Rectangle, type View, BoxShapeClass_CommentBox, BoxShapeClass_Rectangle,
   CommentBox, DeltaTool, DeltaToolAction, DeltaToolbar, JSON_LineShape, JSON_Rectangle, NoBox,
   Point as mkPoint, Rectangle as mkRectangle, ShapeClass_LineShape, ShapeClass_Rectangle,
@@ -117,7 +120,7 @@ export interface Queryable<V> extends Reflective<V> {
    * If this is a diagram then return the list of model entities for which it contains
    * avatars. If this is not a diagram then return @[]@.
    */
-  queryAvatars(v: V): ModelId[];
+  queryAvatars(v: V): readonly ModelId[];
 }
 
 /** The dictionary for `(EntityClass v, Queryable v)`. */
@@ -125,8 +128,8 @@ export type QueryableEntityClass<V> = EntityClass<V> & Queryable<V>;
 
 /** Move to the entities which are represented in the input diagrams. */
 function inDiagramStep<V>(cls: QueryableEntityClass<V>): QueryStep<V> {
-  const d = (m: Model<V>, uuid: ModelId): ModelId[] =>
-    maybe([], (v: V) => cls.queryAvatars(v), preview(ix<ModelId, Entity<V>>(uuid).dot(entityContents<V>()), m.modelContents));
+  const d = (m: Model<V>, uuid: ModelId): readonly ModelId[] =>
+    maybe<V, readonly ModelId[]>([], (v: V) => cls.queryAvatars(v), preview(ix<ModelId, Entity<V>>(uuid).dot(entityContents<V>()), m.modelContents));
   return QueryStep<V>((_outers, model, inputs) =>
     [S.fromList(L.concatMap((u: ModelId) => d(model, u), S.toList(inputs))), []]);
 }
@@ -208,13 +211,16 @@ export function QueryComment<V = any>(_0: string): QueryData<V> {
 /** `instance Default (QueryData v) where def = QueryInput` */
 export const def_QueryData: QueryData<any> = QueryInput;
 
-/** A prism for a constructor of `QueryData` with a single field. */
+/**
+ * TypeScript: the prism for the constructor `tag` of `QueryData`, whose single field has type
+ * `A`. (The Haskell prisms are written out one by one; they all have this shape.)
+ */
 function queryDataPrism<V, K extends QueryData<V>["tag"], A>(
   tag: K,
   build: (a: A) => QueryData<V>,
 ): Prism<QueryData<V>, A> {
   return prism(build, (v: QueryData<V>): Either<QueryData<V>, A> =>
-    (v.tag === tag ? Right((v as { readonly _0: A })._0) : Left(v)));
+    (v.tag === tag ? Right((v as Extract<QueryData<V>, { readonly tag: K }> & { readonly _0: A })._0) : Left(v)));
 }
 
 export function _Step<V = any>(): Prism<QueryData<V>, S.Set<Relation>> {
@@ -609,7 +615,7 @@ export function QElemArrow<V = any>(_0: QueryArrow): QueryElement<V> {
   return { tag: "QElemArrow", _0 };
 }
 
-/** `instance HasId (QueryElement v)` */
+/** `instance HasId (QueryElement v)` (the `identifier` method). */
 function queryElementIdentifier<V>(e: QueryElement<V>): DiagramId {
   switch (e.tag) {
     case "QElemBox": return e._0.queryBoxId;
@@ -617,6 +623,9 @@ function queryElementIdentifier<V>(e: QueryElement<V>): DiagramId {
     default: return absurd(e);
   }
 }
+
+/** `instance HasId (QueryElement v)` */
+export const HasId_QueryElement: HasId<QueryElement<any>> = { identifier: queryElementIdentifier };
 
 /** `instance ToJSON (QueryElement v)` and `instance FromJSON (QueryElement v)` */
 export const JSON_QueryElement: J.JSONCodec<QueryElement<any>> = J.codec(
@@ -749,7 +758,7 @@ export function Avatar_QueryElement<V>(cls: QueryableEntityClass<V>): QueryEleme
       return false;
     },
     itemConnectors: _QElemArrow<V>().dot(queryArrowShape).dot(lineEnds)
-      .dot(both<ConnectorEnd>() as unknown as Traversal<readonly [ConnectorEnd, ConnectorEnd], ConnectorEnd>),
+      .dot<ConnectorEnd, ConnectorEnd>(both<ConnectorEnd>()),
     *itemConnectionPoint(_d, v, _child) {
       switch (v.tag) {
         case "QElemBox": {
@@ -833,7 +842,6 @@ export function queryElementDialog<V>(cls: QueryableEntityClass<V>): DialogSelec
 /** Properties dialog selector for query data within a box. */
 function queryDataDialog<V>(cls: QueryableEntityClass<V>): DialogSelector_<Model<V>, null, QueryData<V>> {
   type E = Model<V>;
-  type QD = QueryData<V>;
   /** Not a proper Iso, but close enough as long as only one element can be selected. */
   const resultIso = <A>(): Iso<Maybe<A>, S.Set<A>> => iso(
     (m: Maybe<A>) => (m.tag === "Just" ? S.singleton(m.value) : S.empty<A>()),
@@ -881,11 +889,8 @@ function queryDataDialog<V>(cls: QueryableEntityClass<V>): DialogSelector_<Model
         return Just(promoteDialog(
           (g: Gadget_<E, null, string>) => prismatic("", _QueryComment<V>(), g),
           queryCommentDialog<E>()));
-      default: {
-        const other: QD = qd;
-        void other;
+      default:
         return Nothing;
-      }
     }
   };
 }
@@ -987,6 +992,27 @@ export function QueryDiagram<V = any>(
 }
 
 /**
+ * TypeScript: a `QueryDiagram` whose `_queryInputs` field is computed by `inputs` when it is
+ * first read (Haskell laziness, see "Reflective_QueryDiagram"). Otherwise it behaves exactly like
+ * a value built with `QueryDiagram`.
+ */
+function lazyQueryDiagram<V>(
+  _queryDiagram: DiagramEntity<QueryElement<V>, null>,
+  inputs: () => S.Set<Variant<V>>,
+  _queryDescription: string,
+): QueryDiagram<V> {
+  let cache: S.Set<Variant<V>> | null = null;
+  return {
+    _queryDiagram,
+    get _queryInputs(): S.Set<Variant<V>> {
+      if (cache === null) cache = inputs();
+      return cache;
+    },
+    _queryDescription,
+  };
+}
+
+/**
  * `instance (EntityClass v, Queryable v) => ToJSON (QueryDiagram v)` and
  * `instance (EntityClass v, Queryable v) => FromJSON (QueryDiagram v)`.
  */
@@ -1012,16 +1038,32 @@ export function JSON_QueryDiagram<V>(cls: QueryableEntityClass<V>): J.JSONCodec<
   );
 }
 
-/** `instance (EntityClass v, Queryable v) => Reflective (QueryDiagram v)` */
+/**
+ * `instance (EntityClass v, Queryable v) => Reflective (QueryDiagram v)`
+ *
+ * TypeScript: in Haskell the default's inputs (`everything`, the names of all the
+ * `reflectiveDefaults` of @v@) are evaluated lazily. The defaults of @v@ usually include this
+ * default (e.g. `map BasicQuery reflectiveDefaults` in "Model.Abstract.BasicTypes"), so
+ * evaluating them eagerly would recurse. Hence `reflectiveDefaults` is a memoised getter, and
+ * the default's `_queryInputs` is a memoised getter that reads `cls.reflectiveDefaults` only when
+ * it is first used.
+ */
 export function Reflective_QueryDiagram<V>(cls: QueryableEntityClass<V>): Reflective<QueryDiagram<V>> {
   const reflDiagram = Reflective_DiagramEntity<QueryElement<V>, null>(Avatar_QueryElement(cls));
-  const everything = S.fromList(cls.reflectiveDefaults.map((v) => cls.reflectiveName(v)));
+  let defaults: readonly QueryDiagram<V>[] | null = null;
   return {
     reflectiveName: () => mkVariant("Query"),
     variantUserLabel: defaultVariantUserLabel,
-    reflectiveDefaults: [
-      QueryDiagram<V>(DiagramEntity<QueryElement<V>, null>(Name("Query-"), mempty_Diagram(), null), everything, ""),
-    ],
+    get reflectiveDefaults(): readonly QueryDiagram<V>[] {
+      if (defaults === null) {
+        defaults = [lazyQueryDiagram<V>(
+          DiagramEntity<QueryElement<V>, null>(Name("Query-"), mempty_Diagram(), null),
+          () => S.fromList(cls.reflectiveDefaults.map((v) => cls.reflectiveName(v))), // everything
+          "",
+        )];
+      }
+      return defaults;
+    },
     reflectiveBuiltIn: () => [nameField, descriptionField],
     reflectiveGet: (qd) =>
       M.union(reflDiagram.reflectiveGet(qd._queryDiagram), M.singleton(descriptionField, ExtText(qd._queryDescription))),
@@ -1282,7 +1324,7 @@ function newBoxTool<V>(cls: QueryableEntityClass<V>, qd: QueryData<V>): Action<Q
         textBlock(boxLabel, [], ShapeClass_Rectangle.shapeBounds(shape))(env);
       };
     }
-    return () => cannotHappen("Query newBoxTool: produced something other than a box.", undefined);
+    return cannotHappen<HadesRender>("Query newBoxTool: produced something other than a box.", () => {});
   };
   return mkScriptAction<QueryElement<V>>(function* (d) {
     const mkBox = (dId: DiagramId, s: BoundBox, a: QueryData<V>): QueryElement<V> =>

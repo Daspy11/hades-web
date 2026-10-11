@@ -6,10 +6,10 @@ import * as C from "@/lib/Data/Colour";
 import { Just, Nothing, type Maybe } from "@/lib/Data/Maybe";
 import { Node, type Forest } from "@/lib/Data/Tree";
 import { lens, type Lens } from "@/lib/Control/Lens";
-import { makeChanges, textPrismInt } from "@/banana-ui/base/Reactive/Banana/Common";
+import { longDate, makeChanges, textPrismInt } from "@/banana-ui/base/Reactive/Banana/Common";
 import {
-  EditBool, EditColour, EditEntry, EditNote, Opt, TableAdd, TableDelete, TableShuffle, enumField, mkField,
-  type Table,
+  EditBool, EditColour, EditCombo, EditDate, EditEntry, EditFixed, EditNote, Opt, TableAdd, TableDelete, TableShuffle,
+  enumField, mkField, type Table,
 } from "@/banana-ui/base/Reactive/Banana/Table";
 import { mkTableView, mkTreeTableView } from "./Table";
 
@@ -169,6 +169,130 @@ describe("mkTableView", () => {
     const { vw, acts } = setup();
     vw.emit("row-activated", Gtk.treePathNewFromString("2"), vw.columns[0]);
     expect(acts).toEqual([[2, row("c", 3)]]);
+  });
+});
+
+describe("mkTableView: other cell editors", () => {
+  interface R2 {
+    readonly kind: "Alpha" | "Beta";
+    readonly flag: Maybe<boolean>;
+    readonly tag: string;
+    readonly opt: Maybe<string>;
+    readonly fixed: number;
+    readonly due: string;
+    readonly paint: Maybe<C.Colour>;
+  }
+  const f2 = <K extends keyof R2>(k: K): Lens<R2, R2[K]> =>
+    lens((r: R2) => r[k], (r: R2, v: R2[K]) => ({ ...r, [k]: v }));
+  const kindColour = (k: "Alpha" | "Beta"): C.Colour => (k === "Alpha" ? C.sRGB24(0, 0, 0) : C.sRGB24(255, 255, 255));
+  const cols2: Table<R2> = [
+    mkField("Kind", f2("kind"), Just((k: string) => "icon-" + k), enumField(["Alpha", "Beta"] as const), Just(kindColour)),
+    mkField("Flag", f2("flag"), Nothing, Opt(EditBool), Nothing),
+    mkField("Tag", f2("tag"), Nothing, EditCombo(["red", "green"]), Nothing),
+    mkField("Opt", f2("opt"), Nothing, Opt(EditCombo(["x", "y"])), Nothing),
+    mkField("Fixed", f2("fixed"), Nothing, EditFixed((n: number) => `#${n}`), Nothing),
+    mkField("Due", f2("due"), Nothing, EditDate(longDate), Nothing),
+    mkField("Paint", f2("paint"), Nothing, Opt(EditColour), Nothing),
+  ];
+  const r0: R2 = {
+    kind: "Alpha", flag: Nothing, tag: "green", opt: Just("y"), fixed: 7, due: "2018-01-03", paint: Nothing,
+  };
+
+  function setup2() {
+    const [box, store] = B.liftMomentIO(() =>
+      mkTableView(Gtk.iconThemeGetDefault(), [], false, cols2, [r0], B.never(), B.pureB<readonly R2[]>([r0])));
+    return { store, vw: findTreeView(box) };
+  }
+
+  /** Start editing the last (editable) cell of a column, as a click on the cell does. */
+  function startEdit(vw: Gtk.TreeView, col: number): Gtk.CellEditable {
+    const c = vw.columns[col];
+    const cell = c.cells[c.cells.length - 1].cell;
+    const text = String(cellProps(vw, col, 0, c.cells.length - 1).text ?? "");
+    vw.startEditing(Gtk.treePathNewFromString("0"), c, cell, text);
+    return vw.editing!.entry;
+  }
+
+  test("cells show the field values, with the column icon", () => {
+    const { vw } = setup2();
+    expect(vw.columns[0].cells.map((p) => p.cell.kind)).toEqual(["pixbuf", "combo"]);
+    expect(cellProps(vw, 0, 0, 0).iconName).toBe("icon-Alpha");
+    expect(cellProps(vw, 0, 0, 1).text).toBe("Alpha");
+    expect(cellProps(vw, 1, 0).text).toBe("");
+    expect(cellProps(vw, 2, 0).text).toBe("green");
+    expect(cellProps(vw, 3, 0).text).toBe("y");
+    expect(cellProps(vw, 4, 0).text).toBe("#7");
+    expect(cellProps(vw, 4, 0).editable).toBe(false);
+    expect(cellProps(vw, 5, 0).text).toBe("3 January 2018");
+    expect(cellProps(vw, 6, 0).text).toBe("");
+  });
+
+  test("a combo cell is edited with a ComboBox decorated with the field's icon and colour", () => {
+    const { store, vw } = setup2();
+    const ed = startEdit(vw, 0);
+    const combo = Gtk.castTo(Gtk.ComboBox, ed)!;
+    expect(combo).not.toBe(null);
+    expect(combo.active).toBe(0);
+    const items = combo.model!.roots().map((n) => combo.itemProps(n));
+    // The text cell of gtk_cell_renderer_combo_start_editing, then the icon packed by the table.
+    expect(items.map((ps) => ps.map((p) => p.kind))).toEqual([["text", "pixbuf"], ["text", "pixbuf"]]);
+    expect(items.map((ps) => ps[0].text)).toEqual(["Alpha", "Beta"]);
+    expect(items.map((ps) => ps[1].iconName)).toEqual(["icon-Alpha", "icon-Beta"]);
+    const fg = items[0][0].foregroundRgba;
+    // White text on black.
+    expect([fg.red, fg.green, fg.blue].map((x: number) => Math.round(x * 255))).toEqual([255, 255, 255]);
+    // Choosing an item and finishing the edit stores the value.
+    combo.setActive(1, true);
+    Gtk.cellEditableEditingDone(combo);
+    expect(vw.editing).toBe(null);
+    expect(Gtk.seqStoreGetValue(store, 0).kind).toBe("Beta");
+  });
+
+  test("optional booleans and combos offer a blank choice", () => {
+    const { store, vw } = setup2();
+    const flag = Gtk.castTo(Gtk.ComboBox, startEdit(vw, 1))!;
+    expect(flag.model!.roots().map((n) => flag.model!.columnValue(n, 0))).toEqual(["", "🗹", "☐"]);
+    flag.setActive(2, true);
+    Gtk.cellEditableEditingDone(flag);
+    expect(Gtk.seqStoreGetValue(store, 0).flag).toEqual(Just(false));
+    const opt = Gtk.castTo(Gtk.ComboBox, startEdit(vw, 3))!;
+    expect(opt.active).toBe(2);
+    opt.setActive(0, true);
+    Gtk.cellEditableEditingDone(opt);
+    expect(Gtk.seqStoreGetValue(store, 0).opt).toEqual(Nothing);
+    const tag = Gtk.castTo(Gtk.ComboBox, startEdit(vw, 2))!;
+    tag.setActive(0, true);
+    Gtk.cellEditableEditingDone(tag);
+    expect(Gtk.seqStoreGetValue(store, 0).tag).toBe("red");
+  });
+
+  test("cancelling a combo edit leaves the value alone", () => {
+    const { store, vw } = setup2();
+    startEdit(vw, 2);
+    vw.stopEditing(true);
+    expect(vw.editing).toBe(null);
+    expect(Gtk.seqStoreGetValue(store, 0).tag).toBe("green");
+  });
+
+  test("text entry editors: dates, optional colours, and focus-out commits", () => {
+    const { store, vw } = setup2();
+    const due = Gtk.castTo(Gtk.Entry, startEdit(vw, 5))!;
+    expect(Gtk.entryGetText(due)).toBe("3 January 2018");
+    // The calendar icon of createDatePopover.
+    expect(due.icons.EntryIconPositionSecondary).toBe("x-office-calendar-symbolic");
+    Gtk.entrySetText(due, "14/2/2019");
+    due.emit("focus-out-event", null);
+    expect(Gtk.seqStoreGetValue(store, 0).due).toBe("2019-02-14");
+    const paint = Gtk.castTo(Gtk.Entry, startEdit(vw, 6))!;
+    expect(paint.icons.EntryIconPositionSecondary).toBe("applications-science");
+    Gtk.entrySetText(paint, "#102030");
+    paint.emit("activate");
+    expect(C.sRGB24show((Gtk.seqStoreGetValue(store, 0).paint as { value: C.Colour }).value)).toBe("#102030");
+    expect(cellProps(vw, 6, 0).text).toBe("#102030");
+    const paint2 = Gtk.castTo(Gtk.Entry, startEdit(vw, 6))!;
+    Gtk.entrySetText(paint2, "");
+    paint2.emit("activate");
+    expect(Gtk.seqStoreGetValue(store, 0).paint).toEqual(Nothing);
   });
 });
 
