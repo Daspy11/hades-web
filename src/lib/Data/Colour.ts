@@ -194,3 +194,4 @@ export const lightblue = named("lightblue");
 export const lightyellow = named("lightyellow");
 export const lightgreen = named("lightgreen");
 export const silver = named("silver");
+export const darkred = named("darkred");

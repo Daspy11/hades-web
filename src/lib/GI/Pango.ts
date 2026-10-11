@@ -3,7 +3,8 @@
  * with wrapping, alignment, indentation, ellipsization and attributes, and drawing layouts
  * on a Cairo context.
  *
- * Measurement uses the canvas text API. Units follow Pango: sizes and positions are in Pango
+ * Measurement uses the canvas text API (or, where no 2D canvas exists, as in jsdom unit tests,
+ * the deterministic `fallbackMeasurer`). Units follow Pango: sizes and positions are in Pango
  * units (`SCALE` = 1024 per device unit) and font sizes are in points, converted at the 96 dpi
  * resolution PangoCairo uses by default (1pt = 4/3 px). Attribute indices are UTF-8 byte
  * offsets, as in Pango.
@@ -19,6 +20,66 @@ export function unitsToDouble(n: number): number {
 }
 
 const PT_TO_PX = 96 / 72;
+
+// ---------------------------------------------------------------------------------------------
+// Text measurement
+
+/** The parts of a canvas 2D context used to measure text. */
+interface TextMeasurer {
+  font: string;
+  measureText(text: string): Pick<TextMetrics, "width" | "fontBoundingBoxAscent" | "fontBoundingBoxDescent" | "actualBoundingBoxAscent" | "actualBoundingBoxDescent">;
+}
+
+/**
+ * Deterministic text measurer used when no 2D canvas is available (unit tests under jsdom,
+ * which has no canvas implementation). Widths come from a small table of Roboto-like advance
+ * widths (as fractions of the font's pixel size, 5% wider for bold); vertical metrics are
+ * Roboto's (ascent 0.928, descent 0.244, cap height 0.711, x-height 0.528). The numbers only
+ * need to be plausible and stable, so layout code can be tested without a browser.
+ */
+export const fallbackMeasurer: TextMeasurer = {
+  font: "10px sans-serif",
+  measureText(text: string) {
+    const px = parseFloat(/(\d+(?:\.\d+)?)px/.exec(this.font)?.[1] ?? "10");
+    const weight = parseInt(/\b([1-9]00)\b/.exec(this.font)?.[1] ?? "400", 10);
+    const bold = weight >= 600 ? 1.05 : 1;
+    let w = 0;
+    for (const c of text) {
+      const f = c === " " ? 0.25
+        : "ijlI.,:;'!|".includes(c) ? 0.25
+        : "frt-()[]".includes(c) ? 0.33
+        : c === "m" || c === "M" ? 0.85
+        : c === "w" || c === "W" ? 0.75
+        : c >= "A" && c <= "Z" ? 0.65
+        : c >= "0" && c <= "9" ? 0.56
+        : 0.53;
+      w += f * px * bold;
+    }
+    const tall = /[A-Z0-9bdfhklt]/.test(text);
+    return {
+      width: w,
+      fontBoundingBoxAscent: 0.928 * px,
+      fontBoundingBoxDescent: 0.244 * px,
+      actualBoundingBoxAscent: text.length === 0 ? 0 : (tall ? 0.711 : 0.528) * px,
+      actualBoundingBoxDescent: /[gjpqy,;]/.test(text) ? 0.21 * px : 0,
+    };
+  },
+};
+
+let noCanvas = false;
+/** The canvas measuring context of `Cairo.measuringContext`, or `fallbackMeasurer` without a canvas. */
+function textMeasurer(): TextMeasurer {
+  if (!noCanvas) {
+    try {
+      const c = measuringContext();
+      if (c) return c;
+    } catch {
+      // No document: fall through.
+    }
+    noCanvas = true;
+  }
+  return fallbackMeasurer;
+}
 
 // ---------------------------------------------------------------------------------------------
 // Fonts
@@ -139,7 +200,7 @@ const metricsCache = new Map<string, { ascent: number; descent: number }>();
 function fontMetricsPx(font: string, px: number): { ascent: number; descent: number } {
   let m = metricsCache.get(font);
   if (!m) {
-    const ctx = measuringContext();
+    const ctx = textMeasurer();
     ctx.font = font;
     const tm = ctx.measureText("Hg");
     const ascent = tm.fontBoundingBoxAscent ?? px * 0.93;
@@ -160,7 +221,7 @@ if (typeof document !== "undefined" && document.fonts) {
 export function contextGetMetrics(_ctx: PangoContext, font: FontDescription | null, _lang: unknown): FontMetrics {
   const f = font ?? new FontDescription();
   const m = fontMetricsPx(f.css(), f.px());
-  const ctx = measuringContext();
+  const ctx = textMeasurer();
   ctx.font = f.css();
   const cw = ctx.measureText("abcdefghijklmnopqrstuvwxyz").width / 26;
   return {
@@ -349,7 +410,7 @@ function measure(font: string, text: string): number {
   const k = font + "\u0000" + text;
   let w = widthCache.get(k);
   if (w === undefined) {
-    const ctx = measuringContext();
+    const ctx = textMeasurer();
     ctx.font = font;
     w = ctx.measureText(text).width;
     if (widthCache.size > 20000) widthCache.clear();
@@ -658,7 +719,7 @@ export function layoutGetExtents(l: Layout): [Rectangle, Rectangle] {
   const ls = l.lines();
   let inkTop = 0, inkBottom = r.height;
   if (ls.length > 0) {
-    const ctx = measuringContext();
+    const ctx = textMeasurer();
     const first = ls[0], last = ls[ls.length - 1];
     if (first.runs.length > 0) {
       ctx.font = first.runs[0].font;
