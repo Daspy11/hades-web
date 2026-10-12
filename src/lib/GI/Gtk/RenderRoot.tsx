@@ -124,7 +124,9 @@ function messageIcon(t: W.MessageDialog["messageType"]): string | null {
 function MessageDialogView({ d }: { d: W.MessageDialog }) {
   useWidget(d);
   if (d.destroyed || !d.visible) return null;
-  const icon = messageIcon(d.messageType);
+  // GTK 3.24 message dialogs show no icon unless an image is set explicitly (the message type
+  // only affects the accessible role), so the icon is not drawn.
+  const icon: string | null = null;
   const buttons = d.actionArea.children.slice().reverse().filter((b): b is W.Button => b instanceof W.Button);
   return (
     <AlertDialog.Root open onOpenChange={(o) => { if (!o) d.requestClose(); }}>

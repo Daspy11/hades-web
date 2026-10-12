@@ -135,7 +135,7 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .gtk-dialog-action-area > .gtk-buttonBox { flex: 1 1 auto; }
 
 .gtk-message-dialog { border-radius: 8px; min-width: 340px; max-width: 520px; }
-.gtk-message-body { display: flex; gap: 18px; padding: 24px 24px 12px; }
+.gtk-message-body { display: flex; justify-content: center; gap: 18px; padding: 24px 30px 18px; text-align: center; }
 .gtk-message-icon { flex: 0 0 auto; opacity: 0.7; }
 .gtk-message-text { margin: 0 0 6px; font-size: 11pt; font-weight: bold; white-space: pre-wrap; }
 .gtk-message-secondary { margin: 0; white-space: pre-wrap; }

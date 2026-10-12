@@ -314,9 +314,24 @@ function BoxView({ w, layout }: { w: W.Box; layout?: LayoutStyle }) {
       onKeyDown={keyHandler(w)}
       {...buttonEventHandlers(w, () => el.current)}
     >
-      {kids}
+      {homogeneousButtons(w, horizontal) ? (
+        // GTK3 button boxes give their children equal widths (the "non-homogeneous" child
+        // property defaults to false): the widest button sets the width of all of them.
+        <div className="gtk-buttonbox-cells" style={{ display: "inline-grid", gridAutoFlow: "column", gridAutoColumns: "1fr", gap: w.spacing }}>
+          {kids}
+        </div>
+      ) : (
+        kids
+      )}
     </div>
   );
+}
+
+/** True if a horizontal button box should lay its children out with equal widths. */
+function homogeneousButtons(w: W.Box, horizontal: boolean): boolean {
+  if (!(w instanceof W.ButtonBox) || !horizontal) return false;
+  const l = w.layout;
+  return l !== "ButtonBoxStyleSpread" && l !== "ButtonBoxStyleEdge" && l !== "ButtonBoxStyleExpand" && w.children.filter((c) => c.visible).length > 1;
 }
 
 function BinView({ w, layout }: { w: Bin; layout?: LayoutStyle }) {
