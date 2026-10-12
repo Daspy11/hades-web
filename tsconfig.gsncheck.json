@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [],
+  "files": ["src/dsm/gsn/GSN/Model.ts", "src/dsm/gsn/GSN/Model.test.ts", "src/scratch/gsnDemo.ts", "src/testSetup.ts"]
+}
