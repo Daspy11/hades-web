@@ -25,7 +25,10 @@
  *   state of a loop is part of the output of the gadget that it feeds. The interpreter therefore
  *   builds initial `GadgetData` values with lazy (memoised) helpers (`gdFmap`, `gdAp`, ...)
  *   whenever an input is lazy. Plain values stay plain, so this only matters inside `Loop`.
- *   Forcing a loop state before it has been defined throws, as `<<loop>>` would in Haskell.
+ *   The fields of the Haskell `GadgetData` are strict, so a lazy value is evaluated as a whole
+ *   (both fields) when either field is read. Evaluating a value that depends on itself (for
+ *   instance the initial output of a loop whose inner gadget computes its output from its
+ *   input) throws, as `<<loop>>` would in Haskell.
  * * Blocking IO that the Haskell runs inside event handlers (the colour chooser `dialogRun`,
  *   the native file chooser, `ButtonIO` actions) is asynchronous here: the handler starts it
  *   and the resulting event fires when it completes. Each place is marked `// Web:`.
@@ -55,7 +58,7 @@ import {
   absurd, ceiling, error, floor, fst, newIORef, readIORef, round, showBool, snd, writeIORef, type IORef,
 } from "@/lib/Prelude";
 import {
-  Changes, GadgetData, ap_GadgetData, append_GadgetData, blankIconName, colourPrism, datePrism, getColour,
+  Changes, GadgetData, ap_GadgetData, append_GadgetData, blankIconName, colourPrism, datePrism, gdOk, gdValue, getColour,
   liftA2_Changes, makeChanges, noIconName, prismToMaybe, pure_Changes, reactimate1, reactimate1_, type Colour,
 } from "@/banana-ui/base/Reactive/Banana/Common";
 import {
@@ -75,6 +78,9 @@ import { behaviorLink, eventLink, registerIOSignal, registerIOSignal1, registerI
 import { cannotHappen, errorBox } from "./ErrorBox";
 import { mkGtkMenu, popupMenuOn } from "./Menu";
 import { mkTableView } from "./Table";
+
+// Re-exported, as in the Haskell export list (`GadgetData (..)`, `gdOk`, `gdValue`).
+export { GadgetData, gdOk, gdValue };
 
 /** The function run on all newly created widgets. */
 type WInit = (w: Gtk.Widget) => void;
@@ -103,43 +109,46 @@ function mconcatEvents<W>(evs: readonly B.Event<readonly W[]>[]): B.Event<readon
 // ---------------------------------------------------------------------------------------------
 // Lazy gadget data (see the module header)
 
-/** Evaluation state of a lazy field. */
+/** Evaluation state of a thunk: unevaluated, being evaluated, evaluated. */
 type LazyState = 0 | 1 | 2;
 
 /**
- * A `GadgetData` whose fields are computed on demand and memoised, emulating Haskell's lazy
- * evaluation of initial values (needed by `Loop`). Re-entrant evaluation is a cycle and throws.
+ * An unevaluated `GadgetData` (a Haskell thunk), needed by `Loop`, whose initial input is defined
+ * in terms of the output of the gadget it feeds. The thunk is evaluated, once, when either field
+ * is read. The Haskell `GadgetData` has strict fields (`_gdOk :: !Bool`, `_gdValue :: !a`), so
+ * evaluating it evaluates both fields, and so does this: reading either field computes the
+ * whole value. Re-entrant evaluation is a cycle and throws, as `<<loop>>` would in Haskell.
+ *
+ * The two fields are own enumerable getters, so code outside the interpreter that copies a
+ * `GadgetData` (`{ ...g }`, the `gdOk`/`gdValue` lenses, `fmap_GadgetData`, structural
+ * equality) sees ordinary fields; copying forces them.
  */
 class LazyGadgetData<A> implements GadgetData<A> {
-  private okState: LazyState = 0;
-  private okValue = false;
-  private valueState: LazyState = 0;
-  private valueValue: A | undefined = undefined;
-  constructor(private readonly okF: () => boolean, private readonly valueF: () => A) {}
-  get _gdOk(): boolean {
-    if (this.okState === 2) return this.okValue;
-    if (this.okState === 1) return error("renderGadget: <<loop>> (a gadget validity flag depends on itself).");
-    this.okState = 1;
-    try {
-      this.okValue = this.okF();
-      this.okState = 2;
-    } finally {
-      if (this.okState === 1) this.okState = 0;
-    }
-    return this.okValue;
+  declare readonly _gdOk: boolean;
+  declare readonly _gdValue: A;
+  constructor(thunk: () => GadgetData<A>) {
+    const force = lazyThunk(thunk, "renderGadget: <<loop>> (a gadget initial value depends on itself).");
+    Object.defineProperty(this, "_gdOk", { enumerable: true, get: () => force()._gdOk });
+    Object.defineProperty(this, "_gdValue", { enumerable: true, get: () => force()._gdValue });
   }
-  get _gdValue(): A {
-    if (this.valueState === 2) return this.valueValue as A;
-    if (this.valueState === 1) return error("renderGadget: <<loop>> (a gadget initial value depends on itself).");
-    this.valueState = 1;
+}
+
+/** A memoised thunk which throws `loopMsg` if it is re-entered while being evaluated. */
+function lazyThunk<A>(f: () => A, loopMsg: string): () => A {
+  let state: LazyState = 0;
+  let value: A;
+  return () => {
+    if (state === 2) return value;
+    if (state === 1) return error(loopMsg);
+    state = 1;
     try {
-      this.valueValue = this.valueF();
-      this.valueState = 2;
+      value = f();
+      state = 2;
     } finally {
-      if (this.valueState === 1) this.valueState = 0;
+      if (state === 1) state = 0;
     }
-    return this.valueValue as A;
-  }
+    return value;
+  };
 }
 
 /** Is this gadget data lazy? */
@@ -147,32 +156,21 @@ function isLazy(x: GadgetData<unknown>): boolean {
   return x instanceof LazyGadgetData;
 }
 
-/** Lazy gadget data from thunks for its fields. */
-function gdLazy<A>(okF: () => boolean, valueF: () => A): GadgetData<A> {
-  return new LazyGadgetData(okF, valueF);
-}
-
-/** A pair whose second component is computed on demand (Haskell tuples are lazy). */
-function lazyPair<A, Bv>(a: A, bF: () => Bv): [A, Bv] {
-  const p: [A, Bv] = [a, undefined as Bv];
-  let done = false;
-  let v: Bv;
-  Object.defineProperty(p, 1, {
-    enumerable: true,
-    get: () => {
-      if (!done) {
-        v = bF();
-        done = true;
-      }
-      return v;
-    },
+/**
+ * Lazy gadget data: `thunk` is evaluated when a field is first read. The fields of the
+ * `GadgetData` it returns are read at once, as the Haskell strict fields are evaluated with
+ * their constructor.
+ */
+function gdLazy<A>(thunk: () => GadgetData<A>): GadgetData<A> {
+  return new LazyGadgetData(() => {
+    const x = thunk();
+    return GadgetData(x._gdOk, x._gdValue);
   });
-  return p;
 }
 
 /** `f <$> x` for gadget data, lazy when `x` is lazy. */
 function gdFmap<A, R>(f: (a: A) => R, x: GadgetData<A>): GadgetData<R> {
-  return isLazy(x) ? gdLazy(() => x._gdOk, () => f(x._gdValue)) : GadgetData(x._gdOk, f(x._gdValue));
+  return isLazy(x) ? gdLazy(() => GadgetData(x._gdOk, f(x._gdValue))) : GadgetData(x._gdOk, f(x._gdValue));
 }
 
 /** `fmap f` for gadget data, as a function (for mapping over events and behaviors). */
@@ -182,14 +180,12 @@ function gdFmapF<A, R>(f: (a: A) => R): (x: GadgetData<A>) => GadgetData<R> {
 
 /** `gf <*> gv` for gadget data, lazy when either argument is lazy. */
 function gdAp<A, R>(gf: GadgetData<(a: A) => R>, gv: GadgetData<A>): GadgetData<R> {
-  return isLazy(gf) || isLazy(gv)
-    ? gdLazy(() => gf._gdOk && gv._gdOk, () => gf._gdValue(gv._gdValue))
-    : ap_GadgetData(gf, gv);
+  return isLazy(gf) || isLazy(gv) ? gdLazy(() => ap_GadgetData(gf, gv)) : ap_GadgetData(gf, gv);
 }
 
 /** Haskell `gdOk %~ f $ x`, lazy when `x` is lazy. */
 function gdOverOk<A>(f: (ok: boolean) => boolean, x: GadgetData<A>): GadgetData<A> {
-  return isLazy(x) ? gdLazy(() => f(x._gdOk), () => x._gdValue) : GadgetData(f(x._gdOk), x._gdValue);
+  return isLazy(x) ? gdLazy(() => GadgetData(f(x._gdOk), x._gdValue)) : GadgetData(f(x._gdOk), x._gdValue);
 }
 
 /** A memoised thunk (a lazy Haskell `let` binding). */
@@ -673,9 +669,7 @@ export function mempty_GadgetOut<W, V>(memptyV: V): GadgetOut<W, V> {
 /** `(<>)` of `instance (Semigroup v) => Semigroup (GadgetOut w v)`; the first argument is `(<>) :: v -> v -> v`. */
 export function append_GadgetOut<W, V>(appendV: (a: V, b: V) => V, g1: GadgetOut<W, V>, g2: GadgetOut<W, V>): GadgetOut<W, V> {
   const appendGD = (x: GadgetData<V>, y: GadgetData<V>): GadgetData<V> =>
-    isLazy(x) || isLazy(y)
-      ? gdLazy(() => x._gdOk && y._gdOk, () => appendV(x._gdValue, y._gdValue))
-      : append_GadgetData(appendV, x, y);
+    isLazy(x) || isLazy(y) ? gdLazy(() => append_GadgetData(appendV, x, y)) : append_GadgetData(appendV, x, y);
   return GadgetOut(
     [...g1.gadgetView, ...g2.gadgetView],
     appendEvents(g1.gadgetEvents, g2.gadgetEvents),
@@ -707,13 +701,13 @@ function qualifyOutput<W, I>(ok: boolean, o: GadgetOut<W, I>): GadgetOut<W, I> {
 /** Merge ouptputs that carry functions, including their validity flags. Widgets are concatenated. */
 function mergeOutputs<W, A>(outs: readonly GadgetOut<W, (a: A) => A>[]): GadgetOut<W, (a: A) => A> {
   type F = (a: A) => A;
+  const merge1 = (x: GadgetData<F>, y: GadgetData<F>): GadgetData<F> => {
+    const f1 = x._gdValue, f2 = y._gdValue;
+    return GadgetData(x._gdOk && y._gdOk, (a: A) => f1(f2(a)));
+  };
+  // merge (GadgetData b1 f1) (GadgetData b2 f2) = GadgetData (b1 && b2) (f1 . f2)
   const merge = (x: GadgetData<F>, y: GadgetData<F>): GadgetData<F> =>
-    isLazy(x) || isLazy(y)
-      ? gdLazy(() => x._gdOk && y._gdOk, () => {
-        const f1 = x._gdValue, f2 = y._gdValue;
-        return (a: A) => f1(f2(a));
-      })
-      : GadgetData(x._gdOk && y._gdOk, (a: A) => x._gdValue(y._gdValue(a)));
+    isLazy(x) || isLazy(y) ? gdLazy(() => merge1(x, y)) : merge1(x, y);
   // Merge a pair of outputs. The tricky bit is ensuring that old invalidity flags do not
   // cause a permanent latch in the user output.
   const merge2 = (out1: GadgetOut<W, F>, out2: GadgetOut<W, F>): GadgetOut<W, F> => GadgetOut(
@@ -736,7 +730,7 @@ function mergeOutputs<W, A>(outs: readonly GadgetOut<W, (a: A) => A>[]): GadgetO
 }
 
 /** Data derived from a "ClickableItem" which is displayed in GTK. */
-interface GtkClickable<A> {
+export interface GtkClickable<A> {
   /** UTF8 byte indices for start and end. */
   readonly gclickRange: readonly [number, number];
   /** Base data. */
@@ -749,8 +743,10 @@ function GtkClickable<A>(gclickRange: readonly [number, number], gclickBase: Cli
 /**
  * Display the items in the label as a comma-separated list, and return a function from the
  * UTF8 index (as used by GTK) to the corresponding GtkClickable.
+ *
+ * (Not exported in Haskell; exported here for the tests.)
  */
-function displayClickables<A>(
+export function displayClickables<A>(
   label: Gtk.Label,
   g: GadgetData<readonly ClickableItem<A>[]>,
 ): (idx: number) => Maybe<GtkClickable<A>> {
@@ -1033,10 +1029,8 @@ function renderGadget_Loop(
     return gdFmap(snd, output.gadgetInitial);
   };
   // loopInitialInput = (,) <$> initial <*> (snd <$> gadgetInitial output)
-  const loopInitialInput: GD = gdLazy(
-    () => initial._gdOk && stateInitial()._gdOk,
-    () => lazyPair(initial._gdValue, () => stateInitial()._gdValue),
-  );
+  // (Evaluating it evaluates the output of the inner gadget, as the GadgetData fields are strict.)
+  const loopInitialInput: GD = gdLazy(() => gdAp(gdFmap((x: any) => (y: any): [any, any] => [x, y], initial), stateInitial()));
   const fbRef: B.Behavior<(i: GD) => GD> = B.lazyB(() => fb);
   const newE = B.apply(fbRef, e);
   const newB = B.applyB(fbRef, b);
@@ -1100,10 +1094,10 @@ function renderGadget_Accum(
   g: AnyGadget,
 ): Out {
   // mdo
+  // applyUpdate (GadgetData _ old) (GadgetData ok newF) = GadgetData ok $ newF old
+  const applyUpdate1 = (old: GD, upd: GadgetData<(a: any) => any>): GD => GadgetData(upd._gdOk, upd._gdValue(old._gdValue));
   const applyUpdate = (old: GD, upd: GadgetData<(a: any) => any>): GD =>
-    isLazy(old) || isLazy(upd)
-      ? gdLazy(() => upd._gdOk, () => upd._gdValue(old._gdValue))
-      : GadgetData(upd._gdOk, upd._gdValue(old._gdValue));
+    isLazy(old) || isLazy(upd) ? gdLazy(() => applyUpdate1(old, upd)) : applyUpdate1(old, upd);
   const inner = renderGadget(iconTheme, wInit, env, initial, envC, e, b, g);
   const outE = B.apply(B.mapB((old: GD) => (upd: GD) => applyUpdate(old, upd), b), inner.gadgetUser);
   return {
@@ -1606,9 +1600,10 @@ function renderGadget_Optional_general(
   // are no inner widgets then it just passes Nothing straight through.
   const fromMaybeD = (m: Maybe<any>): any => fromMaybe(d, m);
   const inner = renderGadget(iconTheme, wInit, env, gdFmap(fromMaybeD, initial), envC, B.mapE(gdFmapF(fromMaybeD), e), B.mapB(gdFmapF(fromMaybeD), b), g);
-  const initialEnabled = isJust(initial._gdValue);
   const widgetM = boxWidgets(wInit, "Vertical", inner.gadgetView);
   if (widgetM.tag === "Nothing") return fmap_GadgetOut(Just, inner);
+  // (Haskell `let`: the initial input is only evaluated when there is a widget.)
+  const initialEnabled = isJust(initial._gdValue);
   const widget = widgetM.value;
   const button = Gtk.checkButtonNew();
   wInit(button);
@@ -1944,9 +1939,13 @@ function renderGadget_Validate(
       stop2();
     });
   }
+  // gdOk %~ (&& validInitial) $ gadgetInitial result (a thunk until it is used).
+  const qualify = (x: GD): GD => GadgetData(x._gdOk && validInitial(), x._gdValue);
   return {
     ...result,
-    gadgetInitial: gdOverOk((ok) => ok && validInitial(), result.gadgetInitial),
+    gadgetInitial: isLazy(initial) || isLazy(result.gadgetInitial)
+      ? gdLazy(() => qualify(result.gadgetInitial))
+      : qualify(result.gadgetInitial),
     gadgetUser: validE,
     gadgetValue: validB,
   };
@@ -2503,7 +2502,6 @@ function renderGadget_ClickableList(wInit: WInit, initial: GD, e: B.Event<GD>, b
     const x1 = Pango.unitsFromDouble(x);
     const y1 = Pango.unitsFromDouble(y);
     const [validIdx, idx] = Pango.layoutXyToIndex(layout, x1, y1);
-    console.log("DEBUG getLabelItem", x, y, validIdx, idx, JSON.stringify(Pango.layoutGetText(layout)), layout.font.css());
     return validIdx ? mapMaybeValue((c: GtkClickable<any>) => c.gclickBase, idxFunc(idx)) : Nothing;
   };
   const evBox = Gtk.new_(Gtk.EventBox, { visibleWindow: true });
@@ -3084,13 +3082,22 @@ function renderGadget_ForestTable(
   forestAdjust(0, 0, gadgets, widthss, heights);
   // Set up resize callback on base.
   // Web: preferred sizes are only known once the widgets are in the page, so the column width
-  // requests (measured once in GTK) are measured again at the first allocation after mapping.
+  // requests (measured once in GTK) are measured again at the first allocation after mapping,
+  // and the initial sizing above is redone with them, so that the size request of the base asks
+  // for the natural widths, as in GTK. If the base is narrower than that, the larger allocation
+  // follows.
   let measured = false;
   Gtk.onWidgetSizeAllocate(base, (rect) => {
     if (!measured && base.el !== null) {
       measured = true;
       headerWidths = [header1.map(headerWidthRequests), ...headers.map(headerGroupWidths)];
       widthGroups = computeWidthGroups();
+      const widthss1 = allocateColumns(Nothing, widthGroups);
+      const headHeight1 = headersAdjust(header1, headers, widthss1);
+      const heights1 = getHeightsForest(gadgets, widthss1).map(treeHeightAdjust);
+      baseSize(headerBase, base, 0, widthss1, headHeight1, heights1);
+      forestAdjust(0, 0, gadgets, widthss1, heights1);
+      if (Gdk.getRectangleWidth(rect) - 5 < sum(L.concat(widthss1))) return;
     }
     const space = Gdk.getRectangleWidth(rect);
     const widthss2 = allocateColumns(Just(space - 5), widthGroups);

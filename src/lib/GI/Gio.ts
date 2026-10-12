@@ -85,6 +85,17 @@ export function accelOfEvent(e: KeyboardEvent): string {
   return [...mods, key].join("+");
 }
 
+/**
+ * `GMemoryInputStream`. Streams are plain byte arrays in this toolkit: the readers that take a
+ * stream (`Gdk.pixbufNewFromStream`, `Rsvg.handleNewFromStreamSync`) take the bytes.
+ */
+export type MemoryInputStream = Uint8Array;
+
+/** `memoryInputStreamNewFromData bytes destroyNotify`: the stream is the data itself. */
+export function memoryInputStreamNewFromData(data: Uint8Array, _destroy: unknown | null): MemoryInputStream {
+  return data;
+}
+
 /** `showUriOnWindow`: open a URI in a new browser tab. */
 export function showUriOnWindow(_w: unknown, uri: string, _time: number): void {
   window.open(uri, "_blank", "noopener");

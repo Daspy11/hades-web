@@ -9,14 +9,18 @@
  * from the type of its argument; in TypeScript `node` inspects the argument at run time, which
  * gives the same results for every instance of the Haskell class (see `node`).
  *
- * Not yet provided: `Text.XML.Light.Proc`, `Text.XML.Light.Input` (`parseXML`, ...) and
- * `Text.XML.Light.Output` (`showTopElement`, ...), which the Haskell module also re-exports.
- * Add them as `Light/Proc.ts`, `Light/Input.ts` and `Light/Output.ts` with an `export *` here.
+ * As in Haskell, `Text.XML.Light.Proc` (`Light/Proc.ts`), `Text.XML.Light.Input`
+ * (`parseXML`, `parseXMLDoc` from `Light/Input.ts`) and `Text.XML.Light.Output`
+ * (`showTopElement`, `showContent`, ... from `Light/Output.ts`) are re-exported here. The lexer
+ * is `Light/Lexer.ts`; the `lens-xml` optics are `Light/Lens.ts`.
  */
 import { blank_cdata, blank_element, blank_name, CData, Elem, Element, QName, Text } from "./Light/Types";
 import type { Attr, Content } from "./Light/Types";
 
 export * from "./Light/Types";
+export * from "./Light/Proc";
+export { parseXML, parseXMLDoc, type XmlSource } from "./Light/Input";
+export * from "./Light/Output";
 
 /** Add an attribute to an element. */
 export function add_attr(a: Attr, e: Element): Element {

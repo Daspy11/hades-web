@@ -632,6 +632,15 @@ export class TreeModelSort extends TreeModel {
     }
     const childModel = this.child;
     if (this.builtVersion === childModel.version) return;
+    // Position of each child node in the previous sorted view. Presenting the rows in their
+    // previous order makes the (stable, run-detecting) sort nearly linear after a small change,
+    // which matters for expensive sort functions; it does not change the result.
+    const prevPos = new Map<RowNode, number>();
+    const notePos = (sns: RowNode[]) => sns.forEach((sn, i) => {
+      prevPos.set(sn.data as RowNode, i);
+      notePos(sn.children);
+    });
+    notePos(this.rootNodes);
     this.map = new Map();
     const cmp = this.sortColumn !== null ? this.sortFuncs.get(this.sortColumn) : undefined;
     const build = (nodes: RowNode[], parent: RowNode | null): RowNode[] => {
@@ -644,7 +653,8 @@ export class TreeModelSort extends TreeModel {
       });
       if (cmp) {
         wrapped = wrapped
-          .map((w, i) => [w, i] as const)
+          .map((w, i) => [w, i, prevPos.get(w.data as RowNode) ?? nodes.length + i] as const)
+          .sort((x, y) => x[2] - y[2])
           .sort((x, y) => {
             const r = cmp(childModel, childModel.iter(x[0].data), childModel.iter(y[0].data));
             return (this.ascending ? r : -r) || x[1] - y[1];

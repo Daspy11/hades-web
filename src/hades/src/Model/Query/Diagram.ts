@@ -1187,6 +1187,9 @@ export function compileQueryDiagram<V>(
       : Left(L.concat(errs));
   };
   const stepOf = (uuid: U.UUID, qs: QueryStep<V>): Compiled => Right(Left([uuid, qs] as const));
+  // compileElem :: (Named v, Reflective v) =>
+  //    Set UUID -> Text -> (UUID, QueryElement v)
+  //    -> Either [Text] (Either (UUID, QueryStep v) (UUID, UUID))
   const compileElem = (
     stack: S.Set<U.UUID>,
     queryName: string,

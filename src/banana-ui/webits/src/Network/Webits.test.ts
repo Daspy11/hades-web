@@ -31,6 +31,10 @@ import {
   WebitClass_WebStatic,
   hideWebit,
   elmerStaticUrl,
+  show_Value,
+  show_LogItem,
+  logLine,
+  LogItem,
   type ElmerEnv,
 } from "./Webits";
 import { getDataFileName } from "@/lib/System/Paths";
@@ -186,5 +190,29 @@ describe("Webits on the loopback engine", () => {
     ok.click();
     const r = await choice;
     expect(r).toEqual({ tag: "Just", value: "go-up" });
+  });
+});
+
+describe("show_Value (aeson's Show Value)", () => {
+  it("shows values as the derived Haskell instance does", () => {
+    expect(show_Value(null)).toBe("Null");
+    expect(show_Value(true)).toBe("Bool True");
+    expect(show_Value(1)).toBe("Number 1.0");
+    expect(show_Value(-2.5)).toBe("Number (-2.5)");
+    expect(show_Value("a\"b")).toBe('String "a\\"b"');
+    expect(show_Value([1, "x", null])).toBe('Array [Number 1.0,String "x",Null]');
+    expect(show_Value({ d: "u", v: [false] })).toBe('Object (fromList [("d",String "u"),("v",Array [Bool False])])');
+    expect(show_Value({ v: { w: 2 } })).toBe('Object (fromList [("v",Object (fromList [("w",Number 2.0)]))])');
+  });
+});
+
+describe("LogItem", () => {
+  it("logLine and show_LogItem", () => {
+    const loc = [["elmerLog", { srcLocModule: "Main", srcLocStartLine: 42 }]] as const;
+    expect(logLine(LogItem("NOTICE", loc, "Menu option 12 clicked."))).toBe("NOTICE Main.elmerLog:42: Menu option 12 clicked.");
+    expect(logLine(LogItem("ERROR", [], "oops"))).toBe("ERROR (unknown location): oops");
+    expect(show_LogItem(LogItem("INFO", loc, "hi"))).toBe(
+      'LogItem {logPriority = INFO, logLocation = [("elmerLog",SrcLoc {srcLocModule = "Main", srcLocStartLine = 42})], logMessage = "hi"}',
+    );
   });
 });

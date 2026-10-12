@@ -361,10 +361,11 @@ export function TreeViewView({ w, layout }: { w: TreeView; layout?: LayoutStyle 
   };
 
   // Drag and drop
-  const binXY = (e: React.DragEvent): [number, number] => {
+  // As in GTK, the drag signals get widget coordinates (convert them with
+  // `treeViewConvertWidgetToBinWindowCoords` before `treeViewGetPathAtPos`).
+  const widgetXY = (e: React.DragEvent): [number, number] => {
     const r = ref.current?.getBoundingClientRect();
-    const header = ref.current?.querySelector<HTMLElement>(".gtk-treeview-header")?.offsetHeight ?? 0;
-    return r ? [e.clientX - r.left, e.clientY - r.top - header] : [0, 0];
+    return r ? [e.clientX - r.left, e.clientY - r.top] : [0, 0];
   };
   const onDragStart = (row: VisibleRow, e: React.DragEvent) => {
     if (!w.dragSource && !w.reorderable) return;
@@ -380,9 +381,13 @@ export function TreeViewView({ w, layout }: { w: TreeView; layout?: LayoutStyle 
     if (!w.dragDest && !w.reorderable) return;
     if (!dragState) return;
     e.preventDefault();
-    const [x, y] = binXY(e);
-    const handled = w.emit("drag-motion", dragState.ctx, x, y, e.timeStamp);
-    if (handled !== true && row) {
+    const [x, y] = widgetXY(e);
+    const ctx = dragState.ctx;
+    ctx.event = e.nativeEvent;
+    ctx.status = undefined;
+    const handled = w.emit("drag-motion", ctx, x, y, e.timeStamp);
+    // A handler refusing the drop with `Gdk.dragStatus` (no action) also gets no default highlight.
+    if (handled !== true && row && ctx.status !== null) {
       const el = (e.target as HTMLElement).closest<HTMLElement>("[data-path]");
       const r = el?.getBoundingClientRect();
       const f = r ? (e.clientY - r.top) / r.height : 0.5;
@@ -394,8 +399,9 @@ export function TreeViewView({ w, layout }: { w: TreeView; layout?: LayoutStyle 
   const onDrop = (e: React.DragEvent) => {
     if (!dragState) return;
     e.preventDefault();
-    const [x, y] = binXY(e);
+    const [x, y] = widgetXY(e);
     const st = dragState;
+    st.ctx.event = e.nativeEvent;
     const handled = w.emit("drag-drop", st.ctx, x, y, e.timeStamp);
     if (handled !== true) w.emit("drag-data-received", st.ctx, x, y, st.paths, 0, e.timeStamp);
     w.dragDestRow = null;
@@ -479,7 +485,8 @@ export function TreeViewView({ w, layout }: { w: TreeView; layout?: LayoutStyle 
             aria-level={row.depth + 1}
             title={tooltip ? String(tooltip) : undefined}
             style={{ display: "contents" }}
-            draggable={w.dragSource || w.reorderable}
+            // The row is `display: contents`, which cannot start an HTML5 drag: its cells are the
+            // draggable elements, and their drag events bubble to the row's handlers.
             onDragStart={(e) => onDragStart(row, e)}
             onDragEnd={onDragEnd}
             onDragOver={(e) => {
@@ -501,6 +508,7 @@ export function TreeViewView({ w, layout }: { w: TreeView; layout?: LayoutStyle 
                 <div
                   key={ci}
                   className={"gtk-treeview-cell" + (selected ? " selected" : "") + (dd ? " " + cls.split(" ").filter((x) => x.startsWith("drop")).join(" ") : "")}
+                  draggable={w.dragSource || w.reorderable}
                   data-col={realCi}
                   data-path={row.path.toString()}
                   style={first || cellBg ? { ...(first ? { paddingLeft: 4 + row.depth * 18 } : {}), ...(cellBg ? { background: cellBg } : {}) } : undefined}
@@ -529,7 +537,7 @@ export function TreeViewView({ w, layout }: { w: TreeView; layout?: LayoutStyle 
                 </div>
               );
             })}
-            {anyExpand ? null : <div className={"gtk-treeview-cell filler" + (selected ? " selected" : "")} data-path={row.path.toString()} />}
+            {anyExpand ? null : <div className={"gtk-treeview-cell filler" + (selected ? " selected" : "")} data-path={row.path.toString()} draggable={w.dragSource || w.reorderable} />}
           </div>
         );
       })}

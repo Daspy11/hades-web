@@ -709,6 +709,9 @@ export function liftMomentIO<A>(act: () => A): A {
   return buildPhase(act);
 }
 
+/** `Handler a` (`a -> IO ()`) from `Reactive.Banana.Frameworks`: what `newEvent` returns to fire the event. */
+export type Handler<A> = (a: A) => void;
+
 /** `newEvent`: an event and the handler that fires it. */
 export function newEvent<A>(): [Event<A>, (a: A) => void] {
   const src = new SourceE<A>(currentNetwork);

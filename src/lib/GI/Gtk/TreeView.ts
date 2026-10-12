@@ -275,25 +275,35 @@ export function treeSelectionGetSelectedRows(s: TreeSelection): [TreePath[], Tre
 export function treeSelectionCountSelectedRows(s: TreeSelection): number {
   return treeSelectionGetSelectedRows(s)[0].length;
 }
+/**
+ * As `_gtk_tree_selection_row_is_selectable`: the selection function (if any) decides whether a
+ * row may change its selection state, for programmatic changes as well as clicks.
+ */
+function rowIsSelectable(s: TreeSelection, n: RowNode, current: boolean): boolean {
+  const m = s.view.model;
+  return !s.selectFunction || !m || s.selectFunction(s, m, m.pathOf(n), current);
+}
 export function treeSelectionSelectPath(s: TreeSelection, p: TreePath): void {
   const n = s.view.model?.nodeAt(p);
   if (!n) return;
+  if (s.selected.has(s.view.keyOf(n)) || !rowIsSelectable(s, n, false)) return;
   if (s.mode !== "SelectionModeMultiple") s.selected.clear();
   s.selected.add(s.view.keyOf(n));
   s.notify();
 }
 export function treeSelectionUnselectPath(s: TreeSelection, p: TreePath): void {
   const n = s.view.model?.nodeAt(p);
-  if (n && s.selected.delete(s.view.keyOf(n))) s.notify();
+  if (n && s.selected.has(s.view.keyOf(n)) && rowIsSelectable(s, n, true) && s.selected.delete(s.view.keyOf(n))) s.notify();
 }
 export function treeSelectionSelectIter(s: TreeSelection, it: TreeIter): void {
   if (!it.node) return;
+  if (s.selected.has(s.view.keyOf(it.node)) || !rowIsSelectable(s, it.node, false)) return;
   if (s.mode !== "SelectionModeMultiple") s.selected.clear();
   s.selected.add(s.view.keyOf(it.node));
   s.notify();
 }
 export function treeSelectionUnselectIter(s: TreeSelection, it: TreeIter): void {
-  if (it.node && s.selected.delete(s.view.keyOf(it.node))) s.notify();
+  if (it.node && s.selected.has(s.view.keyOf(it.node)) && rowIsSelectable(s, it.node, true) && s.selected.delete(s.view.keyOf(it.node))) s.notify();
 }
 export function treeSelectionUnselectAll(s: TreeSelection): void {
   if (s.selected.size === 0) return;

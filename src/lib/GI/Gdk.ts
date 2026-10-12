@@ -341,10 +341,35 @@ export function pixbufNewFromFile(url: string): Pixbuf {
 
 /** A pixbuf from raw image bytes (e.g. an image stored in the model). */
 export function pixbufNewFromBytes(bytes: Uint8Array, mime = "image/png"): Pixbuf {
-  const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: mime }));
+  // Without object URLs (jsdom in unit tests) a data URL holds the bytes.
+  const url = typeof URL.createObjectURL === "function"
+    ? URL.createObjectURL(new Blob([bytes as BlobPart], { type: mime }))
+    : `data:${mime};base64,${btoa(Array.from(bytes, (b) => String.fromCharCode(b)).join(""))}`;
   return pixbufNewFromUrlAtSize(url, -1, -1);
 }
-export const pixbufNewFromStream = pixbufNewFromBytes;
+
+/** Web: the MIME type of image data, from its magic number (GdkPixbuf sniffs the format itself). */
+export function sniffImageMimeType(bytes: Uint8Array): string {
+  const starts = (...xs: number[]): boolean => xs.every((x, i) => bytes[i] === x);
+  if (starts(0x89, 0x50, 0x4e, 0x47)) return "image/png";
+  if (starts(0xff, 0xd8)) return "image/jpeg";
+  if (starts(0x47, 0x49, 0x46)) return "image/gif";
+  if (starts(0x42, 0x4d)) return "image/bmp";
+  if (starts(0x52, 0x49, 0x46, 0x46)) return "image/webp";
+  if (starts(0x3c)) return "image/svg+xml";
+  return "image/png";
+}
+
+/**
+ * `pixbufNewFromStream stream cancellable`. Streams are byte arrays in this toolkit (see
+ * `Gio.memoryInputStreamNewFromData`). The second argument is either the MIME type of the data
+ * or the (ignored) cancellable; without a MIME type the format is sniffed from the data, as
+ * GdkPixbuf does. The image decodes asynchronously: an undecodable image sets `failed` instead
+ * of raising a GError, and `onImagesLoaded` fires when decoding has finished either way.
+ */
+export function pixbufNewFromStream(stream: Uint8Array, mimeOrCancellable: string | null = null): Pixbuf {
+  return pixbufNewFromBytes(stream, typeof mimeOrCancellable === "string" ? mimeOrCancellable : sniffImageMimeType(stream));
+}
 
 export function pixbufGetWidth(p: Pixbuf): number { return p.width; }
 export function pixbufGetHeight(p: Pixbuf): number { return p.height; }
@@ -403,7 +428,17 @@ export const DragActionMove: DragAction = "DragActionMove";
 export class DragContext {
   finished = false;
   success = false;
-  constructor(readonly targets: string[], readonly dom?: DragEvent) {}
+  /**
+   * The action chosen by the last `dragStatus` call of the current "drag-motion" emission:
+   * `undefined` if none was made, `null` if the drop was refused (empty action list).
+   * The renderer resets it before each motion and keeps `event` up to date.
+   */
+  status: DragAction | null | undefined = undefined;
+  /** The DOM event of the current drag motion (the drag start event at first). */
+  event: DragEvent | undefined;
+  constructor(readonly targets: string[], readonly dom?: DragEvent) {
+    this.event = dom;
+  }
 }
 export function dragContextListTargets(ctx: DragContext): string[] {
   return ctx.targets;
@@ -411,4 +446,20 @@ export function dragContextListTargets(ctx: DragContext): string[] {
 export function atomName(a: string): string {
   return a;
 }
-export function dragStatus(_ctx: DragContext, _action: DragAction | null, _time: number): void {}
+/**
+ * `gdk_drag_status`: accept the drop with the action, or refuse it with `null` or an empty list
+ * (gi-gdk takes a `[DragAction]` list). Sets the drop effect of the current DOM drag event, so
+ * the browser shows a "no drop" cursor and does not drop on a refused target.
+ */
+export function dragStatus(ctx: DragContext, action: DragAction | readonly DragAction[] | null, _time: number): void {
+  const a = Array.isArray(action) ? (action as readonly DragAction[])[0] ?? null : (action as DragAction | null);
+  ctx.status = a;
+  const dt = ctx.event?.dataTransfer;
+  if (dt && ctx.event?.type !== "dragstart") {
+    try {
+      dt.dropEffect = a === null ? "none" : a === "DragActionCopy" ? "copy" : a === "DragActionLink" ? "link" : "move";
+    } catch {
+      // Not settable outside drag events.
+    }
+  }
+}

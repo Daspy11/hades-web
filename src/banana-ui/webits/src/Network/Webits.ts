@@ -73,7 +73,8 @@ import * as U from "@/lib/Data/UUID";
 import * as Tr from "@/lib/Data/Tree";
 import { Just, Nothing, type Maybe } from "@/lib/Data/Maybe";
 import { equals } from "@/lib/Data/Ord";
-import { newIORef, readIORef, modifyIORef, type IORef } from "@/lib/Prelude";
+import { newIORef, readIORef, modifyIORef, showBool, showDouble, type IORef } from "@/lib/Prelude";
+import * as T from "@/lib/Data/Text";
 import {
   atomically,
   atomicallySync,
@@ -210,9 +211,18 @@ export function LogItem(logPriority: Priority, logLocation: CallStack, logMessag
   return { logPriority, logLocation, logMessage };
 }
 
-/** `deriving (Show)` for LogItem. */
+/**
+ * `deriving (Show)` for LogItem. (`SrcLoc` has only the two fields kept here, so its other fields
+ * are not shown.)
+ */
 export function show_LogItem(item: LogItem): string {
-  return `LogItem {logPriority = ${item.logPriority}, logLocation = ${JSON.stringify(item.logLocation)}, logMessage = ${JSON.stringify(item.logMessage)}}`;
+  const showLoc = ([fn, loc]: readonly [string, SrcLoc]): string =>
+    "(" + T.showText(fn) + ",SrcLoc {srcLocModule = " + T.showText(loc.srcLocModule) + ", srcLocStartLine = " + String(loc.srcLocStartLine) + "})";
+  return (
+    "LogItem {logPriority = " + item.logPriority +
+    ", logLocation = [" + item.logLocation.map(showLoc).join(",") + "]" +
+    ", logMessage = " + T.showText(item.logMessage) + "}"
+  );
 }
 
 /** One-line representation of a log item. */
@@ -264,11 +274,28 @@ function ElmerUnknownWebit(_0: WebitId): ElmerException {
 }
 const ElmerExhaustedIds: ElmerException = { tag: "ElmerExhaustedIds" };
 
+/**
+ * Haskell `showsPrec d` of an aeson `Value` (aeson 1.5's derived `Show`), as used by the
+ * `ElmerDecodeError` message and the event trace: `Object (fromList [("d",String "..."),...])`,
+ * `Number 1.0`, `Array [...]`, `Bool True`, `Null`. (The fields of an object are shown in their
+ * JSON order; aeson showed them in the order of its `HashMap`.)
+ */
+export function show_Value(v: J.Value, d = 0): string {
+  const paren = (s: string): string => (d > 10 ? "(" + s + ")" : s);
+  if (v === null) return "Null";
+  if (typeof v === "boolean") return paren("Bool " + showBool(v));
+  if (typeof v === "number") return paren("Number " + (v < 0 ? "(" + showDouble(v) + ")" : showDouble(v)));
+  if (typeof v === "string") return paren("String " + T.showText(v));
+  if (Array.isArray(v)) return paren("Array [" + v.map((x) => show_Value(x)).join(",") + "]");
+  const fields = Object.entries(v).map(([k, x]) => "(" + T.showText(k) + "," + show_Value(x) + ")");
+  return paren("Object (fromList [" + fields.join(",") + "])");
+}
+
 /** `instance Show ElmerException` */
 function show_ElmerException(e: ElmerException): string {
   switch (e.tag) {
     case "ElmerDecodeError":
-      return "Could not decode JSON from client: " + e._1 + " in " + J.encode(e._0);
+      return "Could not decode JSON from client: " + e._1 + " in " + show_Value(e._0);
     case "ElmerUnknownWebit":
       return "Event from unknown Webit: " + e._0;
     case "ElmerExhaustedIds":
@@ -407,7 +434,7 @@ export async function makeElmerEnv(
   };
   const receiveElmerEvent = (routes: TVar<M.Map<WebitId, readonly ((v: J.Value) => boolean)[]>>): (() => void) => {
     const [ev] = readEventChan(eng);
-    console.debug("Elmer event received: " + J.encode(ev)); // traceM
+    console.debug("Elmer event received: " + show_Value(ev)); // traceM
     const r = J.parseEither(JSON_WebitEvent(J.valueJ).parseJSON, ev);
     if (r.tag === "Left") return throwSTM(new ElmerExceptionError(ElmerDecodeError(ev, r.value)));
     const { _0: d, _1: v } = r.value;
@@ -748,12 +775,12 @@ export type RoutePattern = string;
  *
  * Web: the page is this page. `elmerScotty` does what loading the original page did: it puts
  * @htmlHead@ and the client libraries (jQuery, jQuery UI and its theme, Fancytree and its win8
- * skin, AppendGrid, @JS/arrowDialog.js@) and the standard stylesheet into the document head, creates
- * the @main@ @div@ in `container` (default `document.body`), installs the client side of the
- * JavaScript bridge with `jsb.debug` on, and then runs `action` against a fresh `ElmerEnv`. The
- * `route` is not used: a single page application has one page. AppendGrid is loaded from the
- * bundled UMD build @JS/AppendGrid.js@ as a global, because the module build @AppendGrid-dev.js@
- * that the original imported into its page script cannot be served unbundled.
+ * skin, AppendGrid, @JS/arrowDialog.js@) and the standard stylesheet into the document head, adds
+ * the @noscript@ message and the @main@ @div@ to `container` (default `document.body`), installs
+ * the client side of the JavaScript bridge with `jsb.debug` on, and then runs `action` against a
+ * fresh `ElmerEnv`. The `route` is not used: a single page application has one page. AppendGrid
+ * is loaded from the bundled UMD build @JS/AppendGrid.js@ as a global, because the module build
+ * @AppendGrid-dev.js@ that the original imported into its page script cannot be served unbundled.
  */
 export async function elmerScotty(
   /** The name of the page that will load this application. */
@@ -793,7 +820,10 @@ export async function elmerScotty(
   // The page script: window.jsb = {ws: ...}; jsb.debug=true;
   (globalThis as unknown as { jsb: { debug: boolean } }).jsb = { debug: true };
   // H.noscript "Sorry, but this application requires JavaScript to be enabled."
-  // (Web: this code is JavaScript, so the noscript message can never show; it is left out.)
+  // (Web: added for fidelity; this code is JavaScript, so the message can never show.)
+  const noscript = document.createElement("noscript");
+  noscript.textContent = "Sorry, but this application requires JavaScript to be enabled.";
+  container.appendChild(noscript);
   const main = document.createElement("div");
   main.id = mainName;
   container.appendChild(main);

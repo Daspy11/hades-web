@@ -16,7 +16,8 @@ export function cannotHappen<A>(err: string, v: A): A {
   const msg =
     "An unexpected event has occured. " +
     "Please save your work in a new file and report this bug.\n\n";
-  // Web: the dialog is shown without blocking (Haskell unsafePerformIO around dialogRun).
+  // Web: the dialog is shown without blocking (Haskell unsafePerformIO around dialogRun). The
+  // error is also logged to the console, since nothing waits for the box.
   console.error("cannotHappen: " + err);
   void errorBox(null, msg + err);
   return v;

@@ -25,7 +25,8 @@
  *   `JSON_EntityShowFields`. `fieldsShown<A, B>()` is the (type-changing) Iso.
  * * `DiagramAppearance t v` is a record with the phantom type parameters kept
  *   (`DiagramAppearance<T, V>`): `DiagramAppearance(arrowLabels, fields, highlights)`,
- *   `append_DiagramAppearance`, `mempty_DiagramAppearance`, `JSON_DiagramAppearance`. Its lenses
+ *   `append_DiagramAppearance`, `mempty_DiagramAppearance`, `JSON_DiagramAppearance`,
+ *   `show_DiagramAppearance`. Its lenses
  *   are zero-argument generic functions (`arrowLabels()`, `entityShowFields()`, `highlights()`).
  * * `PackageAppearance a` is `M.Map<Variant<A>, DiagramAppearance<null, A>>` (`()` is `null`).
  * * Dialogs and gadgets take the `(EntityClass v, HasDiagrams p v, Queryable v)` dictionary
@@ -66,7 +67,7 @@ import {
   table, tickBox, validateText,
   type Dialog_, type DialogSelector_, type Gadget_, type GadgetF_,
 } from "@/banana-ui/base/Reactive/Banana/ArrowDialog";
-import { type Colour, Colour as mkColour, getColour } from "@/banana-ui/base/Reactive/Banana/Common";
+import { type Colour, Colour as mkColour, getColour, show_Colour } from "@/banana-ui/base/Reactive/Banana/Common";
 import { contrastText } from "@/banana-ui/gtk/src/Reactive/Banana/GI/Common";
 import {
   EditColour, EditCombo, EditFixed, TableAdd, TableDelete, TableShuffle, mkField,
@@ -327,6 +328,15 @@ export function append_DiagramAppearance<T, V>(
 /** `instance Monoid (DiagramAppearance t v)` */
 export const mempty_DiagramAppearance: DiagramAppearance<any, any> =
   DiagramAppearance<any, any>(Nothing, mempty_EntityShowFields, []);
+
+/** Derived `instance Show (DiagramAppearance t v)`. (Derived `Eq` is the structural `equals`.) */
+export function show_DiagramAppearance<T, V>(da: DiagramAppearance<T, V>): string {
+  const labels = da._arrowLabels.tag === "Just" ? "Just " + (da._arrowLabels.value ? "True" : "False") : "Nothing";
+  const highlight = ([q, c]: readonly [QueryId, Colour]): string => "(" + q + "," + show_Colour(c) + ")";
+  return "DiagramAppearance {_arrowLabels = " + labels +
+    ", _entityShowFields = " + show_EntityShowFields(da._entityShowFields) +
+    ", _highlights = [" + da._highlights.map(highlight).join(",") + "]}";
+}
 
 /** `mconcat` of the "DiagramAppearance" monoid (used to combine the cascade of appearances). */
 export function mconcat_DiagramAppearance<T, V>(as: readonly DiagramAppearance<T, V>[]): DiagramAppearance<T, V> {
@@ -850,6 +860,9 @@ function getIcon(nm: string): HadesLayout<Maybe<Gdk.Pixbuf>> {
     const sz = 16;
     const iconTheme = env.style.dataIcons;
     const info = Gtk.iconThemeLookupIcon(iconTheme, nm, sz, []);
+    // Web: the pixbuf has its 16x16 size at once (so the layout is right) but its image loads
+    // asynchronously; it draws nothing until loaded, and the canvas repaints on
+    // `Gdk.onImagesLoaded`.
     return info === null ? Nothing : Just(Gtk.iconInfoLoadIcon(info));
   };
 }

@@ -120,7 +120,10 @@ Data files from the original `share` directories are bundled. Use
   `treeViewEnableModelDragSource` and `...Dest`, `widgetDragDestSet`, `onWidgetDragMotion`,
   `onWidgetDragDrop`, `onWidgetDragDataReceived`, `widgetDragDestFindTarget`,
   `treeViewSetDragDestRow`, `Gtk.dragFinish`, `Gdk.dragStatus` and `Gdk.dragContextListTargets`.
-  The selection data is passed as text.
+  The selection data is passed as text. As in GTK, `drag-motion`/`drag-drop` get widget
+  coordinates (convert with `treeViewConvertWidgetToBinWindowCoords`), and
+  `Gdk.dragStatus(ctx, [], t)` (or `null`) refuses the drop: the browser shows "no drop" and
+  the tree view draws no default highlight.
 
 ## Drawing
 

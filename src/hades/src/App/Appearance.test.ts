@@ -38,7 +38,7 @@ import {
   diagramLayout, entityShowFieldId, entityShowFieldStyle, entityShowFields, fieldStyleValues, fieldsShown,
   fieldsShownMap, highlightIso, highlights, labelledFieldAttributes, mconcat_DiagramAppearance,
   mempty_DiagramAppearance, mempty_EntityShowFields, packageAppearanceClean, packageAppearanceDialog,
-  showFieldsClean, show_EntityShowField, show_EntityShowFields, styleName, uniqueVariants,
+  showFieldsClean, show_DiagramAppearance, show_EntityShowField, show_EntityShowFields, styleName, uniqueVariants,
 } from "./Appearance";
 
 const id = (n: number): U.UUID => U.fromWords(0, 0, 0, n);
@@ -158,6 +158,15 @@ describe("DiagramAppearance", () => {
     const dirty = mkDA(Nothing, EntityShowFields([["", []], ["Goal", [fsf(FieldStyleNone, id(1))]], ["Goal", [fsf(FieldStyleAbove, id(2))]]]), []);
     expect(diagramAppearanceClean(dirty)._entityShowFields).toEqual(
       EntityShowFields([["Goal", [fsf(FieldStyleNone, id(1)), fsf(FieldStyleAbove, id(2))]]]));
+  });
+  it("has the derived Show", () => {
+    expect(show_DiagramAppearance(mempty_DiagramAppearance)).toBe(
+      "DiagramAppearance {_arrowLabels = Nothing, _entityShowFields = EntityShowFields {_fieldsShown = []}, _highlights = []}");
+    expect(show_DiagramAppearance(append_DiagramAppearance(d2, d1))).toBe(
+      "DiagramAppearance {_arrowLabels = Just True, _entityShowFields = " +
+      show_EntityShowFields(append_EntityShowFields(f2, f1)) +
+      ", _highlights = [(00000000-0000-0000-0000-00000000000b,#0000ff),(00000000-0000-0000-0000-00000000000a,#ff0000)]}");
+    expect(show_DiagramAppearance(mkDA(Just(false), mempty_EntityShowFields, []))).toMatch(/^DiagramAppearance \{_arrowLabels = Just False,/);
   });
   it("shows the highlights in a table with a blank row", () => {
     const black = Colour(C.black);

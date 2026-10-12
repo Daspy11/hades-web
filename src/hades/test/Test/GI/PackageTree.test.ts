@@ -14,17 +14,20 @@
  *   Haskell type has no JSON instances; the TypeScript dictionary needs `entityJ`, which is
  *   provided through the package codec.
  * * The GTK half of the original test (`getGtkTree`, `gtkTestTree`, `prop_treeOp`, `runTests`)
- *   needs "Model.GI.PackageTree", which is not ported yet. It is kept in the `describe.skip`
- *   block at the end of this file. In its place, "edit log replay" checks the same property
- *   without GTK: replaying the "ModelEditLog" of a random sequence of tree operations onto a
- *   plain tree (what `updateGtkTree` does to the GTK tree store) gives the tree of the new model.
+ *   runs against the toolkit's `Gtk.TreeStore`/`Gtk.TreeModelSort` at the end of this file.
+ *   `runTests` returns the QuickCheck result as `[success, counterexample]`, and the vitest
+ *   test asserts it. In addition, "edit log replay" checks the same property without GTK:
+ *   replaying the "ModelEditLog" of a random sequence of tree operations onto a plain tree
+ *   (what `updateGtkTree` does to the GTK tree store) gives the tree of the new model.
  */
-import { describe, expect, it } from "vitest";
+// @vitest-environment jsdom
+import { describe, expect, it, vi } from "vitest";
+import * as Gtk from "@/lib/GI/Gtk";
 import * as M from "@/lib/Data/Map";
 import * as J from "@/lib/Data/Aeson";
 import * as U from "@/lib/Data/UUID";
 import { Just, Nothing, type Maybe } from "@/lib/Data/Maybe";
-import { compare } from "@/lib/Data/Ord";
+import { compare, equals } from "@/lib/Data/Ord";
 import { Node, drawTree, fmapTree, flattenForest, type Forest, type Tree } from "@/lib/Data/Tree";
 import { error } from "@/lib/Prelude";
 import { identity, iso, view, type Iso } from "@/lib/Control/Lens";
@@ -33,12 +36,25 @@ import { type Reflective } from "@/hades/src/Model/Reflection/Reflective";
 import { Variant } from "@/hades/src/Model/Reflection/Values";
 import { mempty_RefTypeTable } from "@/hades/src/Model/Reflection/References";
 import {
-  type Entity, type EntityClass, type Model, type ModelEdit, type ModelEditLog, type ModelEditState,
+  type Entity, type EntityClass, type Model, type ModelEdit, type ModelEditCtx, type ModelEditLog, type ModelEditState,
   type ModelId, type ModelUpdate, Name, Package, JSON_Model, JSON_Package, Reflective_Package, checkModel, currentPath, delete_,
   emptyModel, entityName, eq_Model, evalModelEdit, execModelEdit, goToEntity, mkEntity, modelPackageForest,
   modelStartState, monadic, moveEntity, nameText, packageName, renameEntity, runModelEdit, show_ModelEditLog,
   show_ModelError, stateModel,
 } from "@/hades/src/Model/Abstract/PackageTree";
+import {
+  GtkEntity, GtkTreeInfo, clearTree, entityColumnTypes, entityToGtk, getEntityTree, show_GtkEntity,
+  storeEntityForest, treeSortF, updateGtkTree,
+} from "@/hades/src/Model/GI/PackageTree";
+
+/** Messages of the error boxes shown by "modelErrorWarning" (errorBox is mocked). */
+const shownErrors: string[] = vi.hoisted(() => []);
+vi.mock("@/banana-ui/gtk/src/Reactive/Banana/GI/ErrorBox", async (orig) => ({
+  ...(await orig<typeof import("@/banana-ui/gtk/src/Reactive/Banana/GI/ErrorBox")>()),
+  errorBox: async (_parent: unknown, msg: string) => {
+    shownErrors.push(msg);
+  },
+}));
 
 // ---------------------------------------------------------------------------------------------
 // Minimal QuickCheck replacement.
@@ -458,66 +474,90 @@ describe("Test.GI.PackageTree: random tree operations", () => {
   });
 });
 
-describe.skip("Test.GI.PackageTree: GTK tree view (needs Model.GI.PackageTree, not yet ported)", () => {
-  // Enable once src/hades/src/Model/GI/PackageTree.ts exists. The Haskell original is:
-  //
-  // getGtkTree :: (EntityClass a, Monad m) => Model a -> m (Tree GtkEntity)
-  // getGtkTree model = do
-  //     forest <- Model.Abstract.PackageTree.monadic [] $ evalModelEdit id model gtkEntities
-  //     return $ Node (GtkEntity (Name $ modelName model) "model-home" UUID.nil) forest
-  //   where
-  //     gtkEntities = map (fmap $ entityToGtk (const "")) <$> modelPackageForest
-  //
-  // -- | Set up the GTK test data.
-  // gtkTestTree :: (EntityClass a) => Model a -> IO (GtkTreeInfo a)
-  // gtkTestTree model = do
-  //     Node _ forest <- getGtkTree model
-  //     store <-  Gtk.treeStoreNew entityColumnTypes
-  //     sorted <- Gtk.new Gtk.TreeModelSort [#model := store]
-  //     vw <- Gtk.treeViewNewWithModel sorted
-  //     Gtk.treeSortableSetSortFunc sorted 0 treeSortF
-  //     Gtk.treeSortableSetSortColumnId sorted 0 Gtk.SortTypeAscending
-  //     iter <- clearTree store $ Name $ modelName model
-  //     storeEntityForest store iter forest
-  //     return $ GtkTreeInfo store sorted vw (const "")
-  //
-  // prop_treeOp :: (Gtk.IsWidget window) =>
-  //   window -> ModelEditState TestItem -> [(ModelEdit TestItem TestItem (), String)] -> Property
-  // prop_treeOp window state acts = monadicIO $ do
-  //     monitor $ counterexample $ "Acts = " <> show (map snd acts)
-  //     let
-  //       (update, newState) = case runModelEdit id state $ mapM fst acts of
-  //           Left err -> error $ "prop_treeOp: " <> show err
-  //           Right x -> x
-  //     newModelTree <- getGtkTree $ stateModel newState
-  //     monitor $ counterexample $ "EditLog = " <> show (updateEditLog update)
-  //     newGtkTree <- run $ do
-  //       treeInfo <- gtkTestTree $ stateModel state
-  //       updateGtkTree window treeInfo $ updateEditLog update
-  //       let GtkTreeInfo _ gtkSorted _ _ = treeInfo
-  //       (_, iter) <- Gtk.treeModelGetIter gtkSorted =<< Gtk.treePathNewFromIndices [0]
-  //       getEntityTree gtkSorted iter
-  //     monitor $ counterexample $ "GTK tree = " <> drawTree (fmap show newGtkTree)
-  //     assert $ newGtkTree == newModelTree
-  //
-  // -- | Run many tests. Note that this calls Gtk.initGUI and creates a window.
-  // runTests :: IO Bool
-  // runTests = do
-  //     void $ Gtk.init Nothing
-  //     window <- Gtk.windowNew Gtk.WindowTypeToplevel
-  //     r <- quickCheckWithResult stdArgs {maxSuccess = 1000} $ \model (Positive n) -> do
-  //       let state = modelStartState gen model
-  //       acts <- arbitraryTreeOpSequence n state
-  //       return $ prop_treeOp window state acts
-  //     case r of
-  //       Success {} -> return True
-  //       _ -> return False
-  //   where
-  //     Right (gen :: Generator) = newGen "3aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-  //
-  // A TypeScript version would build the tree store with `gtkTestTree`, apply
-  // `updateGtkTree(window, treeInfo, update.updateEditLog)` and compare `getEntityTree` of the
-  // sorted model with `getGtkTree` of the new model, for the same generated `acts` as the
-  // "random tree operations" test above.
-  it.todo("prop_treeOp: updateGtkTree keeps the GTK tree in step with the model");
+// ---------------------------------------------------------------------------------------------
+// The GTK half of the original test: the tree store is updated with "updateGtkTree".
+
+function getGtkTree<A>(cls: EntityClass<A>, model: Model<A>): Tree<GtkEntity> {
+  const gtkEntities = (c: ModelEditCtx<A, A>): Forest<GtkEntity> =>
+    modelPackageForest(c).map((t) => fmapTree((e: Entity<A>) => entityToGtk(cls, () => "", e), t));
+  const forest = monadic<unknown, Forest<GtkEntity>>([], evalModelEdit(cls, identity<A>(), model, gtkEntities));
+  return Node(GtkEntity(Name(model.modelName), "model-home", U.nil), forest);
+}
+
+/** Set up the GTK test data. */
+function gtkTestTree<A>(cls: EntityClass<A>, model: Model<A>): GtkTreeInfo<A> {
+  const forest = getGtkTree(cls, model).subForest;
+  const store = Gtk.treeStoreNew(entityColumnTypes);
+  const sorted = Gtk.new_(Gtk.TreeModelSort, { model: store });
+  const vw = Gtk.treeViewNewWithModel(sorted);
+  Gtk.treeSortableSetSortFunc(sorted, 0, treeSortF);
+  Gtk.treeSortableSetSortColumnId(sorted, 0, Gtk.SortTypeAscending);
+  const iter = clearTree(store, Name(model.modelName));
+  storeEntityForest(store, iter, forest);
+  return GtkTreeInfo(store, sorted, vw, () => "");
+}
+
+/** QuickCheck `Property` result: success, or the counterexample text. */
+type Property = { readonly ok: true } | { readonly ok: false; readonly counterexample: string };
+
+function prop_treeOp(
+  window: Gtk.Widget,
+  state: ModelEditState<TestItem>,
+  acts: readonly [ModelEdit<TestItem, TestItem, void>, string][],
+): Property {
+  const cls = EntityClass_TestItem;
+  const monitor: string[] = [];
+  monitor.push("Acts = " + JSON.stringify(acts.map((a) => a[1])));
+  const r = runModelEdit(cls, identity<TestItem>(), state, (c) => acts.map(([act]) => act(c)));
+  if (r.tag === "Left") return error("prop_treeOp: " + show_ModelError(r.value));
+  const [update, newState] = r.value;
+  const newModelTree = getGtkTree(cls, stateModel(newState));
+  monitor.push("EditLog = " + update.updateEditLog.map(show_ModelEditLog).join(""));
+  // run $ do
+  const treeInfo = gtkTestTree(cls, stateModel(state));
+  updateGtkTree(cls, window, treeInfo, update.updateEditLog);
+  const gtkSorted = treeInfo._1;
+  const [, iter] = Gtk.treeModelGetIter(gtkSorted, Gtk.treePathNewFromIndices([0]));
+  const newGtkTree = getEntityTree(gtkSorted, iter);
+  monitor.push("GTK tree = " + drawTree(fmapTree(show_GtkEntity, newGtkTree)));
+  return equals(newGtkTree, newModelTree) ? { ok: true } : { ok: false, counterexample: monitor.join("\n") };
+}
+
+/**
+ * Run many tests. Note that this calls Gtk.initGUI and creates a window.
+ *
+ * (TypeScript: `quickCheckWithResult stdArgs {maxSuccess = 1000}` is a loop over 1000 seeded
+ * cases with the QuickCheck size cycling through 0..99; the result also carries the first
+ * counterexample.)
+ */
+function runTests(): [boolean, string] {
+  const gen = newGenOrFail("3aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+  Gtk.init(null);
+  const window = Gtk.windowNew(Gtk.WindowTypeToplevel);
+  const maxSuccess = 1000;
+  for (let i = 0; i < maxSuccess; i++) {
+    const g: GenCtx = { rng: mkRng(104729 * i + 7), size: i % 100 };
+    const model = arbModel.arbitrary(g);
+    const n = arbitraryPositive(g);
+    const state = modelStartState(gen, model);
+    const acts = arbitraryTreeOpSequence(EntityClass_TestItem, Arbitrary_TestItem, n, state)(g);
+    const p = prop_treeOp(window, state, acts);
+    if (!p.ok) return [false, "Failed after " + (i + 1) + " tests:\n" + p.counterexample];
+  }
+  return [true, ""];
+}
+
+describe("Test.GI.PackageTree: GTK tree view", () => {
+  it("prop_treeOp: updateGtkTree keeps the GTK tree in step with the model (runTests)", () => {
+    shownErrors.length = 0;
+    const [ok, counterexample] = runTests();
+    // Any "modelErrorWarning" from updateGtkTree would have shown an error box.
+    expect(shownErrors).toEqual([]);
+    expect(ok, counterexample).toBe(true);
+  }, 120000);
+
+  it("sortTree sorts children by label at every level", () => {
+    const t = Node(3, [Node(2, [Node(9), Node(1)]), Node(1)]);
+    expect(sortTree(t)).toEqual(Node(3, [Node(1), Node(2, [Node(1), Node(9)])]));
+  });
 });

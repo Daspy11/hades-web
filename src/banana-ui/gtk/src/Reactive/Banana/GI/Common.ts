@@ -116,6 +116,7 @@ export function safeLoadIcon(theme: Gtk.IconTheme, name: T.Text, sz: number): Ma
     return fromNullable(Gtk.imageGetPixbuf(i));
   };
   if (Gtk.iconThemeHasIcon(theme, name)) {
+    // Web: a load failure after the check gives Nothing (and so the fail icon) instead of a GError.
     const icon1 = fromNullable(loadIconOrNull(theme, name, sz, []));
     const f = failIcon();
     return icon1.tag === "Just" ? icon1 : f; // icon1 <|> f
@@ -128,7 +129,10 @@ function fromNullable<A>(x: A | null): Maybe<A> {
   return x === null ? Nothing : Just(x);
 }
 
-/** `Gtk.iconThemeLoadIcon` with gi-gtk's nullable result (the toolkit version throws). */
+/**
+ * `Gtk.iconThemeLoadIcon` with its `Maybe Pixbuf` result type, where a missing icon (a GError in
+ * gi-gtk; an exception in the toolkit) is `null`.
+ */
 function loadIconOrNull(theme: Gtk.IconTheme, name: T.Text, sz: number, flags: unknown): Gdk.Pixbuf | null {
   try {
     return Gtk.iconThemeLoadIcon(theme, name, sz, flags);

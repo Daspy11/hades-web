@@ -5,10 +5,11 @@ import * as B from "@/lib/Reactive/Banana";
 import * as C from "@/lib/Data/Colour";
 import { Just, Nothing, type Maybe } from "@/lib/Data/Maybe";
 import { flatten } from "@/lib/Data/Tree";
-import { datePrism, longDate, makeChanges, type Colour } from "@/banana-ui/base/Reactive/Banana/Common";
+import { datePrism, longDate, makeChanges, noIconName, type Colour } from "@/banana-ui/base/Reactive/Banana/Common";
 import {
-  colourToRGBA, contrastText, createColorDialog, createDatePopover, plainChanges, rgbaToColour, sameWidget,
-  unlessFocused, widgetLinkColour, widgetTree, widgetWindow, withWaitCursor,
+  colourToRGBA, contrastText, createColorDialog, createDatePopover, iconDialog, iconTabsWidget, iconThemeContents,
+  objectDescription, plainChanges, rgbaToColour, safeLoadIcon, sameWidget, unlessFocused, widgetLinkColour,
+  widgetTree, widgetWindow, withWaitCursor,
 } from "./Common";
 
 describe("colours", () => {
@@ -61,6 +62,78 @@ describe("widgets", () => {
     const l = Gtk.labelNew("x");
     expect(withWaitCursor(l, () => 42)).toBe(42);
     await expect(withWaitCursor(l, () => Promise.resolve("done"))).resolves.toBe("done");
+  });
+});
+
+describe("icons", () => {
+  const theme = Gtk.iconThemeGetDefault();
+
+  /** The first widget of a class in a widget tree. */
+  function find<W extends Gtk.Widget>(cls: new (...args: any[]) => W, w: Gtk.Widget): W {
+    const ws = flatten(widgetTree(w)).filter((x): x is W => x instanceof cls);
+    expect(ws.length).toBeGreaterThan(0);
+    return ws[0];
+  }
+
+  test("safeLoadIcon loads known icons and gives Nothing for unknown ones", () => {
+    const pb = safeLoadIcon(theme, "document-open", 22);
+    expect(pb.tag).toBe("Just");
+    expect(pb.tag === "Just" && pb.value.width).toBe(22);
+    expect(safeLoadIcon(theme, "no-such-icon-anywhere", 22)).toEqual(Nothing);
+  });
+
+  test("iconThemeContents lists sorted, filtered contexts, optionally led by the no-icon icon", () => {
+    const all = iconThemeContents(theme, false, () => true);
+    const names = all.map(([c]) => c);
+    expect(names.length).toBeGreaterThan(1);
+    expect(names).toEqual([...names].sort());
+    for (const [, icons] of all) {
+      const ns = icons.map((i) => i.iconName);
+      expect(ns).toEqual([...ns].sort());
+    }
+    const withNone = iconThemeContents(theme, true, (c) => c === names[0]);
+    expect(withNone.map(([c]) => c)).toEqual([names[0]]);
+    expect(withNone[0][1][0].iconName).toBe(noIconName);
+    expect(withNone[0][1].slice(1).map((i) => i.iconName)).toEqual(all[0][1].map((i) => i.iconName));
+    expect(withNone[0][1][0].iconPixbuf.width).toBe(48);
+  });
+
+  test("iconTabsWidget has a page per context; activating an icon fires its name", () => {
+    const ctxs = iconThemeContents(theme, false, () => true).slice(0, 2);
+    const seen: string[] = [];
+    const [book, ev] = B.liftMomentIO(() => iconTabsWidget(ctxs));
+    B.subscribeE(ev, (n) => seen.push(n));
+    expect(Gtk.notebookGetNPages(book)).toBe(2);
+    const page1 = Gtk.notebookGetNthPage(book, 1)!;
+    expect(Gtk.labelGetText(Gtk.notebookGetTabLabel(book, page1) as Gtk.Label)).toBe(ctxs[1][0]);
+    const vw = find(Gtk.IconView, page1);
+    expect(vw.pixbufColumn).toBe(1);
+    vw.emit("item-activated", Gtk.treePathNewFromString("1"));
+    expect(seen).toEqual([ctxs[1][1][1].iconName]);
+  });
+
+  test("iconDialog calls the continuation with the chosen icon and closes", () => {
+    const win = Gtk.windowNew(Gtk.WindowTypeToplevel);
+    const btn = Gtk.buttonNewWithLabel("x");
+    Gtk.containerAdd(win, btn);
+    const ctxs = iconThemeContents(theme, true, () => true).slice(0, 1);
+    const chosen: string[] = [];
+    iconDialog(btn, ctxs, (t) => chosen.push(t));
+    const dialog = Gtk.toplevels.list().find((w): w is Gtk.Window =>
+      w instanceof Gtk.Window && w.title === "Icon Selection" && !w.destroyed)!;
+    expect(dialog).toBeDefined();
+    expect(dialog.modal).toBe(true);
+    expect(dialog.transientFor).toBe(win);
+    find(Gtk.IconView, dialog).emit("item-activated", Gtk.treePathNewFromString("0"));
+    expect(chosen).toEqual([noIconName]);
+    expect(dialog.destroyed).toBe(true);
+  });
+
+  test("objectDescription gives the widget name (by default its type name) and an address", () => {
+    const l = Gtk.labelNew("x");
+    expect(objectDescription(l)).toMatch(/^GtkLabel\(0x[0-9a-f]{16}\)$/);
+    Gtk.widgetSetName(l, "status");
+    expect(objectDescription(l)).toMatch(/^status\(0x[0-9a-f]{16}\)$/);
   });
 });
 

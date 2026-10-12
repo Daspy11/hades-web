@@ -758,5 +758,107 @@ describe("query diagram editing", () => {
     expect(e2).toMatchObject({ tag: "Connected", connectorTarget: b2.queryBoxId });
     expect(ed2.out?.outCheckpoint).toEqual(Just("Added arrow to query diagram"));
   });
+
+  it("views, handles and adjusts arrows", () => {
+    const b1 = box(Parent, 1000, 0); // (1000,0)-(1200,100)
+    const b2 = box(Children, 1000, 400); // (1000,400)-(1200,500)
+    const arrow = QueryArrow(did(), LineShape([
+      Connected(P(1100, 50), b1.queryBoxId, Nothing),
+      Connected(P(1100, 450), b2.queryBoxId, Nothing),
+    ], []));
+    const ed = new Editor(tm.st, tm.q3, newEnv(),
+      diagramFromList(qcls, [QElemBox(b1), QElemBox(b2), QElemArrow<TV>(arrow)]));
+    let vw: View<QE> | null = null;
+    let nBoxHandles = 0;
+    let nArrowHandles = 0;
+    let cp: Point | null = null;
+    let desc = "";
+    let unchanged: QE | null = null;
+    ed.script(function* (d) {
+      vw = yield* d.cls.itemView(d, QElemArrow<TV>(arrow));
+      nBoxHandles = (yield* d.cls.itemHandles(d, QElemBox(b1))).length;
+      nArrowHandles = (yield* d.cls.itemHandles(d, QElemArrow<TV>(arrow))).length;
+      cp = (yield* qcls.itemConnectionPoint(d, QElemBox(b1), Nothing))(P(1100, 450));
+      desc = yield* d.cls.itemDescription(d, QElemArrow<TV>(arrow));
+      // Arrows cannot be resized; boxes do not adjust.
+      unchanged = yield* qcls.itemResize(d, [10, 10], QElemArrow<TV>(arrow));
+      yield* qcls.itemAdjust(d, QElemBox(b1));
+      yield* qcls.itemAdjust(d, QElemArrow<TV>(arrow));
+      return yield* yieldViews(d);
+    });
+    expect(desc).toBe("Query arrow");
+    expect(nBoxHandles).toBe(8);
+    expect(nArrowHandles).toBeGreaterThanOrEqual(2);
+    expect(cp).toEqual(P(1100, 100));
+    expect(unchanged).toEqual(QElemArrow<TV>(arrow));
+    // The view box allows for the arrow head.
+    expect(vw!.viewBox).toEqual(BoundBox(P(1088, 38), P(1112, 462)));
+    expect(vw!.viewTouched(P(1100, 250))).toBe(true);
+    expect(vw!.viewTouched(P(1300, 250))).toBe(false);
+    const labels = menuItems(vw!.viewMenu(P(1100, 250))).map(([l]) => l);
+    expect(labels[0]).toBe("Add bend");
+    expect(labels).toContain("To top");
+    expect(render(vw!)).toContain("<path");
+    // itemAdjust moved the ends to the box boundaries; the box is unchanged.
+    const stored = ed.items();
+    const a2 = stored.find((e) => e.tag === "QElemArrow")!;
+    const [s, e] = previewOrThrow(_QElemArrow<TV>().dot(queryArrowShape), a2)._lineEnds;
+    expect(s.connectorPoint).toEqual(P(1100, 100));
+    expect(e.connectorPoint).toEqual(P(1100, 400));
+    expect(stored.find((x) => qcls.identifier(x) === b1.queryBoxId)).toEqual(QElemBox(b1));
+    // The arrow is selected by touching its line; boxes by their area.
+    expect(qcls.itemTouched(a2, 1, P(1100, 250))).toBe(true);
+    expect(qcls.itemInBox(a2, BoundBox(P(0, 0), P(2000, 2000)))).toBe(true);
+    expect(qcls.itemInBox(QElemBox(b1), BoundBox(P(0, 0), P(500, 500)))).toBe(false);
+  });
+
+  it("describes variant sets, arrow types and filters", () => {
+    const ed = new Editor(tm.st, tm.q1);
+    const all = S.fromList(["Package", "Box", "Link", "Diagram", "Query"].map(Variant));
+    const boxes = [
+      box(Variants<TV>(all)), box(FilterVariants<TV>(S.empty())), box(Backwards<TV>(linkArrows)),
+      box(Forwards<TV>(M.empty())), box(Filter<TV>("Name=\"x\"")), box(Parent),
+    ];
+    const views: View<QE>[] = [];
+    ed.script(function* (d) {
+      for (const b of boxes) views.push(yield* d.cls.itemView(d, QElemBox(b)));
+      return yield* yieldViews(d);
+    });
+    const svgs = views.map(render);
+    expect(svgs[0]).toContain("&lt;Everything&gt;");
+    expect(svgs[1]).toContain("&lt;Nothing&gt;");
+    // Compared with all the arrow types of the model ("Link" is the only one).
+    expect(svgs[2]).toContain("Follow backwards");
+    expect(svgs[2]).toContain("&lt;Everything&gt;");
+    expect(svgs[3]).toContain("&lt;Nothing&gt;");
+    expect(svgs[4]).toMatch(/Name=(&quot;|")x(&quot;|")/);
+    expect(svgs[5]).toContain("Parent entity");
+  });
+
+  it("handles a query input box outside a query", () => {
+    // The context is an entity that is not a query: the input box cannot find its inputs.
+    const env = newEnv(() => {
+      throw new Error("No dialog expected");
+    });
+    const ed = new Editor(tm.st, tm.a, env, diagramFromList(qcls, [QElemBox(box(QueryInput))]));
+    const [input] = ed.items();
+    let vw: View<QE> | null = null;
+    ed.script(function* (d) {
+      vw = yield* d.cls.itemView(d, input);
+      return yield* yieldViews(d);
+    });
+    expect(render(vw!)).toContain("- Internal Error -");
+    // "Edit inputs" does nothing.
+    ed.action(menuItems(vw!.viewMenu(P(10, 10)))[0][1]);
+    expect(env.log).not.toContain("ScriptDialog");
+    expect(ed.out?.outCheckpoint).toEqual(Nothing);
+  });
+
+  it("reports a deleted query when testing it", () => {
+    // A nil context is the model root, where there is no current entity.
+    const ed = new Editor(tm.st, U.nil);
+    const [[, testAction]] = menuItems(queryBackgroundMenu(cls, P(0, 0)));
+    expect(() => ed.action(testAction)).toThrow(/Query has been deleted\./);
+  });
 });
 

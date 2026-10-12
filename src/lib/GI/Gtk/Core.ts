@@ -578,8 +578,9 @@ export function widgetSetName(w: Widget, n: string): void {
   w.name = n;
   w.changed();
 }
+/** As `gtk_widget_get_name`: the widget's name, or its type name (e.g. `GtkLabel`) if none was set. */
 export function widgetGetName(w: Widget): string {
-  return w.name;
+  return w.name !== "" ? w.name : "Gtk" + w.kind.charAt(0).toUpperCase() + w.kind.slice(1);
 }
 export function widgetSetSizeRequest(w: Widget, width: number, height: number): void {
   w.widthRequest = width;

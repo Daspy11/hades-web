@@ -13,7 +13,7 @@ import * as Select from "@radix-ui/react-select";
 import * as Tabs from "@radix-ui/react-tabs";
 import * as Slider from "@radix-ui/react-slider";
 import * as RSeparator from "@radix-ui/react-separator";
-import * as Tooltip from "@radix-ui/react-tooltip";
+import { createPortal } from "react-dom";
 import { Bin, Widget, stripMnemonic, iconSizePixels, type Align } from "./Core";
 import * as W from "./Widgets";
 import { ComboBox, ComboBoxText, IconView } from "./Choosers";
@@ -137,18 +137,57 @@ export function focusHandlers(w: Widget): { onFocus?: () => void; onBlur?: () =>
   return r;
 }
 
-/** Wrap an element in a Radix tooltip if the widget has tooltip text. */
+/** Wrap an element in a tooltip if the widget has tooltip text. */
 function withTooltip(w: Widget, el: React.ReactElement): React.ReactElement {
   if (!w.tooltip) return el;
+  return <TooltipWrap w={w}>{el}</TooltipWrap>;
+}
+
+/**
+ * Shows the widget's tooltip below it when the pointer rests on it, as GTK does. The widget
+ * views do not forward refs or event props (a Radix `Tooltip.Trigger asChild` got neither, so
+ * tooltips never opened), so the wrapper is a `display: contents` span, which adds no layout
+ * box but still sees the pointer events of the widget, and the tooltip is placed from the
+ * widget's own element.
+ */
+function TooltipWrap({ w, children }: { w: Widget; children: React.ReactElement }) {
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const timer = useRef<number | null>(null);
+  const clear = useCallback(() => {
+    if (timer.current !== null) {
+      window.clearTimeout(timer.current);
+      timer.current = null;
+    }
+  }, []);
+  useEffect(() => clear, [clear]);
+  const hide = () => {
+    clear();
+    setPos(null);
+  };
   return (
-    <Tooltip.Root delayDuration={600}>
-      <Tooltip.Trigger asChild>{el}</Tooltip.Trigger>
-      <Tooltip.Portal>
-        <Tooltip.Content className="gtk-tooltip" side="bottom" sideOffset={4}>
-          {w.tooltip}
-        </Tooltip.Content>
-      </Tooltip.Portal>
-    </Tooltip.Root>
+    <span
+      style={{ display: "contents" }}
+      onPointerEnter={() => {
+        clear();
+        timer.current = window.setTimeout(() => {
+          timer.current = null;
+          const r = w.el?.getBoundingClientRect();
+          if (r) setPos({ left: Math.max(8, Math.min(window.innerWidth - 8, r.left + r.width / 2)), top: r.bottom + 4 });
+        }, 600);
+      }}
+      onPointerLeave={hide}
+      onPointerDown={hide}
+    >
+      {children}
+      {pos && w.tooltip
+        ? createPortal(
+          <div className="gtk-tooltip" role="tooltip" style={{ position: "fixed", left: pos.left, top: pos.top, transform: "translateX(-50%)" }}>
+            {w.tooltip}
+          </div>,
+          document.body,
+        )
+        : null}
+    </span>
   );
 }
 
@@ -232,10 +271,13 @@ function childLayout(c: Widget, horizontal: boolean, expandAll: boolean): Layout
 
 function BoxView({ w, layout }: { w: W.Box; layout?: LayoutStyle }) {
   const horizontal = w.orientation === "OrientationHorizontal";
-  const start = w.children.filter((c) => c.packing.packType !== "PackTypeEnd");
-  const end = w.children.filter((c) => c.packing.packType === "PackTypeEnd").reverse();
-  const anyExpand = w.children.some((c) => c.visible && (c.packing.expand || (horizontal ? c.hexpandSet && c.hexpand : c.vexpandSet && c.vexpand)));
   const isButtonBox = w instanceof W.ButtonBox;
+  // A GtkButtonBox lays its children out in insertion order whatever their pack type (it uses
+  // `_gtk_box_get_children`), so dialog buttons added with `dialogAddButton` (packed at the end)
+  // read left to right in the order they were added: "Cancel", "OK", "Apply".
+  const start = isButtonBox ? w.children : w.children.filter((c) => c.packing.packType !== "PackTypeEnd");
+  const end = isButtonBox ? [] : w.children.filter((c) => c.packing.packType === "PackTypeEnd").reverse();
+  const anyExpand = w.children.some((c) => c.visible && (c.packing.expand || (horizontal ? c.hexpandSet && c.hexpand : c.vexpandSet && c.vexpand)));
   const style: LayoutStyle = {
     display: "flex",
     flexDirection: horizontal ? "row" : "column",
@@ -523,7 +565,9 @@ function tabDropAllowed(to: W.Notebook): boolean {
   const { from, child } = tabDrag;
   const page = from.pages.find((p) => p.child === child);
   if (!page) return false;
-  if (from === to) return page.reorderable;
+  // As in GTK, a detachable tab dropped back on its own notebook (which is in its own group)
+  // is moved to the drop position, even if it is not reorderable.
+  if (from === to) return page.reorderable || (page.detachable && from.groupName !== null);
   if (!page.detachable || from.groupName === null || from.groupName !== to.groupName) return false;
   // Not into a notebook inside the page being dragged.
   for (let a: Widget | null = to; a; a = a.parent) if (a === child) return false;
@@ -536,6 +580,17 @@ function NotebookView({ w, layout }: { w: W.Notebook; layout?: LayoutStyle }) {
   // Tab position where a dragged tab would be dropped (for the drop indicator).
   const [dropAt, setDropAt] = useState<number | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
+  // As GTK does for a scrollable notebook, keep the current tab scrolled into view.
+  const nPages = w.pages.length;
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list || !w.scrollable || cur < 0) return;
+    const tab = Array.from(list.children).filter((el) => el.classList.contains("gtk-notebook-tab"))[cur];
+    if (!tab) return;
+    const lr = list.getBoundingClientRect(), tr = tab.getBoundingClientRect();
+    if (tr.right > lr.right) list.scrollLeft += tr.right - lr.right;
+    if (tr.left < lr.left) list.scrollLeft -= lr.left - tr.left;
+  }, [cur, nPages, w.scrollable]);
   const dropIndex = (e: React.DragEvent): number => {
     const tabs = listRef.current ? Array.from(listRef.current.children).filter((el) => el.classList.contains("gtk-notebook-tab")) : [];
     for (let i = 0; i < tabs.length; i++) {
@@ -635,14 +690,28 @@ function NotebookView({ w, layout }: { w: W.Notebook; layout?: LayoutStyle }) {
           {w.actionWidgets.end ? <div className="gtk-notebook-action"><WidgetView w={w.actionWidgets.end} /></div> : null}
         </div>
       ) : null}
-      <div className="gtk-notebook-pages" style={{ flex: "1 1 auto", position: "relative", minHeight: 0, display: "flex", flexDirection: "column" }}>
+      {/* As in GTK, the notebook requests the size of its largest page, so a dialog does not
+          change size when the user switches tabs: the pages share one grid cell and the
+          inactive ones are hidden with `visibility` (still laid out, not shown or focusable). */}
+      <div
+        className="gtk-notebook-pages"
+        // GTK clips the pages to the notebook's allocation (e.g. a notebook squeezed in a pane).
+        style={{ flex: "1 1 auto", position: "relative", minHeight: 0, display: "grid", gridTemplate: "minmax(0, 1fr) / minmax(0, 1fr)", overflow: "hidden" }}
+      >
         {w.pages.map((p, i) => (
           <Tabs.Content
             key={p.child.objectId}
             value={String(p.child.objectId)}
             forceMount
             className="gtk-notebook-page"
-            style={{ display: i === cur ? "flex" : "none", flex: "1 1 auto", flexDirection: "column", minHeight: 0 }}
+            style={{
+              gridArea: "1 / 1",
+              display: p.child.visible ? "flex" : "none",
+              visibility: i === cur ? undefined : "hidden",
+              flexDirection: "column",
+              minHeight: 0,
+              minWidth: 0,
+            }}
           >
             <WidgetView w={p.child} layout={{ flex: "1 1 auto", minHeight: 0 }} />
           </Tabs.Content>
@@ -708,7 +777,9 @@ function LabelView({ w, layout }: { w: W.Label; layout?: LayoutStyle }) {
     overflowWrap: w.wrap && w.wrapMode !== "WrapModeWord" ? "anywhere" : undefined,
     userSelect: w.selectable ? "text" : undefined,
     ...(w.ellipsize !== "EllipsizeModeNone" ? { overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 } : {}),
-    ...(w.maxWidthChars > 0 ? { maxWidth: `${w.maxWidthChars}ch` } : {}),
+    // max-width-chars limits the natural width; a label given an explicit allocation (a child
+    // of a Layout, see `widgetSizeAllocate`) uses the whole allocated width, as in GTK.
+    ...(w.maxWidthChars > 0 && layout?.width === undefined ? { maxWidth: `${w.maxWidthChars}ch` } : {}),
     ...(w.widthChars > 0 ? { minWidth: `${w.widthChars}ch` } : {}),
     ...layout,
   };
@@ -803,7 +874,9 @@ function EntryView({ w, layout }: { w: W.Entry; layout?: LayoutStyle }) {
 
 function ButtonContent({ w }: { w: W.Button }) {
   const c = w.child();
-  if (c) return <WidgetView w={c} />;
+  // As in GTK, a child widget with the default horizontal alignment (fill) gets the whole width
+  // of the button (so a wrapping label with xalign 0 is left-aligned in a wide button).
+  if (c) return <WidgetView w={c} layout={c.halign === "AlignFill" ? { flex: "1 1 auto", minWidth: 0 } : undefined} />;
   const label = w.label ? (w.useUnderline ? stripMnemonic(w.label) : w.label) : null;
   return (
     <>
