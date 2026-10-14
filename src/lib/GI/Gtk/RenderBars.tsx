@@ -196,7 +196,7 @@ function ToolItemView({ it }: { it: Widget }) {
         </RToolbar.Button>
         <Dropdown.Root modal={false}>
           <Dropdown.Trigger asChild>
-            <RToolbar.Button className="gtk-toolbutton gtk-menutoolbutton-arrow" disabled={!menu || menu.children.length === 0} aria-label={it.arrowTooltip ?? "More"}>
+            <RToolbar.Button className="gtk-toolbutton gtk-menutoolbutton-arrow" disabled={!itemEnabled(it) || !menu || menu.children.length === 0} aria-label={it.arrowTooltip ?? "More"}>
               <img src={iconUrl("pan-down-symbolic", 16) ?? undefined} width={12} height={12} alt="" />
             </RToolbar.Button>
           </Dropdown.Trigger>

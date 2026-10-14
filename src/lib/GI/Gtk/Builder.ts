@@ -5,6 +5,7 @@
  */
 import { GObject, Widget, Container, registerToplevel, stockLabels, type Orientation } from "./Core";
 import * as W from "./Widgets";
+import { normaliseAccel } from "../Gio";
 
 export class Builder extends GObject {
   readonly objects = new Map<string, GObject>();
@@ -153,7 +154,20 @@ function applyProperty(obj: GObject, cls: string, name: string, value: string, a
   }
 }
 
-function buildObject(el: Element, b: Builder, pendingImages: [W.MenuItem | W.Button, string][]): GObject | null {
+/** `<accelerator>` elements waiting for their widget to reach its toplevel window. */
+type PendingAccel = [GObject, string];
+
+/** GDK modifier masks of a Glade `<accelerator modifiers="...">` as GTK accelerator prefixes. */
+function gladeAccel(key: string, mods: string): string {
+  const names: Record<string, string> = {
+    GDK_CONTROL_MASK: "<Control>", GDK_SHIFT_MASK: "<Shift>", GDK_MOD1_MASK: "<Alt>",
+    GDK_SUPER_MASK: "<Super>", GDK_META_MASK: "<Meta>",
+  };
+  const prefix = mods.split("|").map((m) => names[m.trim()] ?? "").join("");
+  return prefix + key;
+}
+
+function buildObject(el: Element, b: Builder, pendingImages: [W.MenuItem | W.Button, string][], pendingAccels: PendingAccel[] = []): GObject | null {
   const cls = el.getAttribute("class") ?? "";
   const id = el.getAttribute("id");
   const obj = construct(cls);
@@ -161,12 +175,16 @@ function buildObject(el: Element, b: Builder, pendingImages: [W.MenuItem | W.But
   if (id) b.objects.set(id, obj);
   for (const p of Array.from(el.children)) {
     if (p.tagName === "property") applyProperty(obj, cls, p.getAttribute("name") ?? "", p.textContent ?? "", b.objects, pendingImages);
+    // An `activate` accelerator of an actionable widget: registered on its window below.
+    if (p.tagName === "accelerator" && (p.getAttribute("signal") ?? "activate") === "activate") {
+      pendingAccels.push([obj, gladeAccel(p.getAttribute("key") ?? "", p.getAttribute("modifiers") ?? "")]);
+    }
   }
   for (const c of Array.from(el.children)) {
     if (c.tagName !== "child") continue;
     const childEl = Array.from(c.children).find((x) => x.tagName === "object");
     if (!childEl) continue;
-    const child = buildObject(childEl, b, pendingImages);
+    const child = buildObject(childEl, b, pendingImages, pendingAccels);
     if (!(child instanceof Widget)) continue;
     const packing = Array.from(c.children).find((x) => x.tagName === "packing");
     const pk: Record<string, string> = {};
@@ -189,11 +207,22 @@ export function builderNewFromString(xml: string, _len = -1): Builder {
   const b = new Builder();
   const doc = new DOMParser().parseFromString(xml, "application/xml");
   const pendingImages: [W.MenuItem | W.Button, string][] = [];
+  const pendingAccels: PendingAccel[] = [];
   for (const el of Array.from(doc.documentElement.children)) {
     if (el.tagName === "object") {
-      const o = buildObject(el, b, pendingImages);
+      const o = buildObject(el, b, pendingImages, pendingAccels);
       if (o instanceof W.Window) registerToplevel(o);
     }
+  }
+  // Accelerators of widgets with an action name (`win.save`) go to their window's accelerator
+  // table (`Gio.setAccelsForAction`), as GTK's accel group activates the widget, which
+  // activates its action.
+  for (const [w, accel] of pendingAccels) {
+    const actionName = (w as { actionName?: string | null }).actionName;
+    if (!(w instanceof Widget) || !actionName) continue;
+    let top: Widget = w;
+    while (top.parent) top = top.parent;
+    if (top instanceof W.Window) top.accels.set(normaliseAccel(accel), actionName.replace(/^(win|app)\./, ""));
   }
   for (const [w, imgId] of pendingImages) {
     const img = b.objects.get(imgId);

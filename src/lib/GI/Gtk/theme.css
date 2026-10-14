@@ -159,7 +159,12 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .gtk-about-body { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 18px; text-align: center; }
 .gtk-about-name { font-size: 18pt; font-weight: bold; }
 .gtk-about-version, .gtk-about-copyright { opacity: 0.6; }
-.gtk-about-license { font-size: 9pt; opacity: 0.8; white-space: pre-wrap; }
+/* GTK shows the licence in a scrolled text view (behind a "License" button), so a long licence
+   never makes the dialog taller than the screen. */
+.gtk-about-license {
+  font-size: 9pt; opacity: 0.8; white-space: pre-wrap; text-align: left; max-height: 25vh; overflow: auto;
+  align-self: stretch; border: 1px solid #cdc7c2; border-radius: 4px; padding: 6px; background: #ffffff;
+}
 
 .gtk-color-chooser { width: 360px; }
 .gtk-color-palette { display: grid; grid-template-columns: repeat(5, 40px); gap: 6px; justify-content: center; padding: 12px; }

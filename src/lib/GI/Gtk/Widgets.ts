@@ -1528,7 +1528,13 @@ export function menuPopdown(m: Menu): void {
 export function menuAttachToWidget(m: Menu, w: Widget, _detacher: unknown): void {
   m.attachWidget = w;
 }
-export const menuAttach = (m: Menu, w: Widget): void => menuAttachToWidget(m, w, null);
+/**
+ * `gtk_menu_attach menu child left right top bottom`: place a menu item in the menu's grid. The
+ * toolkit's menus are single columns, so the item goes in row @top@.
+ */
+export function menuAttach(m: Menu, child: Widget, _left: number, _right: number, top: number, _bottom: number): void {
+  menuShellInsert(m, child, top);
+}
 
 export class MenuItem extends Bin {
   override readonly kind: string = "menuItem";

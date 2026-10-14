@@ -78,7 +78,9 @@ export function accelOfEvent(e: KeyboardEvent): string {
   const mods: string[] = [];
   if (e.altKey) mods.push("alt");
   if (e.ctrlKey || e.metaKey) mods.push("control");
-  if (e.shiftKey && e.key.length > 1) mods.push("shift");
+  // Shift counts for named keys and letters (GTK's `<Shift><Control>z` is Ctrl+Shift+Z, not
+  // Ctrl+Z); for other printable characters it is part of the character.
+  if (e.shiftKey && (e.key.length > 1 || e.key.toLowerCase() !== e.key.toUpperCase())) mods.push("shift");
   mods.sort();
   let key = e.key.toLowerCase();
   if (key === " ") key = "space";
