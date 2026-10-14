@@ -24,7 +24,8 @@ import * as J from "@/lib/Data/Aeson";
 import * as T from "@/lib/Data/Text";
 import * as QC from "@/lib/Test/QuickCheck";
 import { Just, Nothing, fromMaybe, type Maybe } from "@/lib/Data/Maybe";
-import { drawForest, fmapTree, type Forest } from "@/lib/Data/Tree";
+import { fmapTree, type Forest, type Tree } from "@/lib/Data/Tree";
+import * as L from "@/lib/Data/List";
 import { set, view } from "@/lib/Control/Lens";
 import { showBool, showInt } from "@/lib/Prelude";
 import { atomically, atomicallySync, dupTChan, newTChanIO, orElse, readTChan, writeTChan } from "@/lib/Control/Concurrent/STM";
@@ -78,6 +79,32 @@ import { Arbitrary_DemoData, demoBool, demoDefault, demoForest, demoText, pretty
 
 /** The environment of the demo dialogs: the forest offered by the tree selector. */
 type DemoForest = Forest<readonly [T.Text, Maybe<T.Text>, Maybe<number>]>;
+
+
+// ---------------------------------------------------------------------------------------------
+// Data.Tree.drawForest, exactly as in containers.
+
+/**
+ * `Data.Tree.drawForest` (containers): @unlines . map drawTree@ with @drawTree = unlines . draw@,
+ * so every tree is followed by an empty line, and labels are split with `lines`. (A local copy:
+ * `drawForest` in `@/lib/Data/Tree` leaves out the final newline and splits labels on every
+ * newline; other modules' tests rely on that output.)
+ */
+export function drawForest(ts: Forest<string>): string {
+  return L.unlines(ts.map((t) => L.unlines(draw(t))));
+}
+
+/** `draw` of `Data.Tree` (containers). */
+function draw(t: Tree<string>): string[] {
+  const shift = (first: string, other: string, ls: readonly string[]): string[] =>
+    ls.map((l, i) => (i === 0 ? first : other) + l);
+  const drawSubTrees = (ts: Forest<string>): string[] => {
+    if (ts.length === 0) return [];
+    if (ts.length === 1) return ["|", ...shift("`- ", "   ", draw(ts[0]))];
+    return ["|", ...shift("+- ", "|  ", draw(ts[0])), ...drawSubTrees(ts.slice(1))];
+  };
+  return [...L.lines(t.rootLabel), ...drawSubTrees(t.subForest)];
+}
 
 
 // ---------------------------------------------------------------------------------------------

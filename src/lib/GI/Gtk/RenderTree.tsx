@@ -411,6 +411,11 @@ export function TreeViewView({ w, layout }: { w: TreeView; layout?: LayoutStyle 
   };
   const onDragStart = (row: VisibleRow, e: React.DragEvent) => {
     if (!w.dragSource && !w.reorderable) return;
+    // A drag is not a click: no in-place editing afterwards (GTK starts editing on release).
+    if (editTimer.current) {
+      window.clearTimeout(editTimer.current);
+      editTimer.current = null;
+    }
     if (!sel.selected.has(w.keyOf(row.node))) selectRow(row, { ctrlKey: false, metaKey: false, shiftKey: false });
     const paths = rows.filter((r) => sel.selected.has(w.keyOf(r.node))).map((r) => r.path);
     const ctx = new DragContext(w.dragTargets ?? ["hades/entity"], e.nativeEvent);

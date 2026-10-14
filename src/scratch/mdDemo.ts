@@ -275,7 +275,7 @@ const modelClass: HasDiagrams<P, TV, null> & Editable<P, TV> = {
 };
 
 const picF = (e: Entity<TV>): string =>
-  e._entityContents.tag === "Pkg" ? "model-package" : e._entityContents.tag === "Thing" ? "query-entities" : "view-control";
+  e._entityContents.tag === "Pkg" ? "model-package" : e._entityContents.tag === "Thing" ? "text-x-generic-symbolic" : "view-control";
 
 /** The demo model: package "Plant" with three things and two diagrams, package "Spares". */
 function demoModel(): { model: Model<TV>; dgm1: ModelId; dgm2: ModelId } {

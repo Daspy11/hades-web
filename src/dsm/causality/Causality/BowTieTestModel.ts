@@ -41,11 +41,11 @@ import {
   GsnDiagramItem, JSON_GsnItem, Reflective_GsnItem, gsnDiagramEntityTypes, gsnDiagramWrapper, gsnIsDiagram,
   gsnItemName,
 } from "@/dsm/gsn/GSN/Model";
-import { bowTieDiagramVariant, bowTieRiskEventVariant } from "../FieldNames";
+import { bowTieDiagramVariant, bowTieRiskEventVariant } from "./FieldNames";
 import {
   type BowTie, type BowTieClass, type BowTieType, type ElemBowTie, BowTieDiagram, DiagramTypeClass_BowTieType,
   JSON_BowTie, Reflective_BowTie, bowTieName, riskDiagramEntityTypes, riskDiagramWrapper, riskIsDiagram,
-} from "../Risk";
+} from "./Risk";
 
 /** The package metadata: diagram appearances per variant. */
 export type PM = PackageAppearance<TV>;

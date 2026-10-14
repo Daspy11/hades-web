@@ -19,7 +19,7 @@ import { getIconData, scottyIcons } from "@/banana-ui/webits/src/Network/Webits/
 import { mkWebitPopupSelect } from "@/banana-ui/webits/src/Network/Webits/ArrowDialog";
 import { constantDialog } from "@/banana-ui/base/Reactive/Banana/ArrowDialog";
 import type { Menu } from "@/banana-ui/base/Reactive/Banana/Menu";
-import { appHeader, choiceButton, choicePage, demoForestEditor, demoImageAction, scottyUrl } from "./Main";
+import { appHeader, choiceButton, choicePage, demoForestEditor, demoImageAction, drawForest, scottyUrl } from "./Main";
 import { demoDialog } from "./Dialog";
 import { demoBool, demoDefault, demoForest, type DemoData } from "./Types";
 import type { Model } from "./Matrix";
@@ -31,6 +31,21 @@ async function flush(n = 10): Promise<void> {
 }
 
 const menuLabels = (m: Menu<any>): string[][] => m._0.map((xs) => xs.map((i) => i.menuLabel));
+
+describe("drawForest", () => {
+  // Expected values are the output of GHC's Data.Tree.drawForest (containers 0.6).
+  it("is unlines . map drawTree, with drawTree = unlines . draw", () => {
+    expect(drawForest([])).toBe("");
+    expect(drawForest([Node("a", [])])).toBe("a\n\n");
+    expect(drawForest([Node("a", [Node("b", []), Node("c", [Node("d", [])])]), Node("e", [])])).toBe(
+      "a\n|\n+- b\n|\n`- c\n   |\n   `- d\n\ne\n\n",
+    );
+  });
+  it("splits labels with lines", () => {
+    expect(drawForest([Node("", [Node("x\n", [])])])).toBe("|\n`- x\n\n");
+    expect(drawForest([Node("p\nq", [])])).toBe("p\nq\n\n");
+  });
+});
 
 describe("demoForestEditor", () => {
   const g = demoForestEditor.dialogGadget as any;
