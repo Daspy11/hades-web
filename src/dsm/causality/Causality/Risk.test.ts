@@ -671,8 +671,11 @@ describe("the DiagramTypeClass instance", () => {
     expect(arrowTypeValues.map((a) => dtc.arrowHeadExportRelation(a))).toEqual([Nothing, Nothing, Nothing]);
     expect(arrowTypeValues.map((a) => dtc.arrowLineDashes(a))).toEqual([[], [], traceArrowDash]);
     expect(arrowTypeValues.map((a) => dtc.arrowDecorations(Nothing, a))).toEqual([[], [], []]);
-    expect(dtc.arrowHeadDraw(Nothing, "RiskArrow")).toEqual(openArrowHead(45, 10));
-    expect(dtc.arrowHeadDraw(Nothing, "HazardArrow")).toEqual(closedArrowHead(90, 10, false));
+    // Arrow heads hold a drawing function: compare their sizes.
+    const size = (h: { arrowHeadLength: number; arrowHeadWidth: number }) => [h.arrowHeadLength, h.arrowHeadWidth];
+    expect(size(dtc.arrowHeadDraw(Nothing, "RiskArrow"))).toEqual(size(openArrowHead(45, 10)));
+    expect(size(dtc.arrowHeadDraw(Nothing, "HazardArrow"))).toEqual(size(closedArrowHead(90, 10, false)));
+    expect(size(dtc.arrowHeadDraw(Nothing, "HazardArrow"))).not.toEqual(size(openArrowHead(45, 10)));
     expect(dtc.arrowHeadDraw(Nothing, "TraceArrow")).toBe(traceArrowHead);
   });
 
@@ -806,7 +809,8 @@ describe("drawing", () => {
     expect(svg(drawBowTieRiskEventBox(b.boxShapeClass, cls, Nothing, () => {}, Nothing, b.boxShape, bb))).toMatch(/>Event<\/text>/);
     // Even an oval (state box) or a parallelogram (event box) is drawn as a rectangle.
     const rect = svg(drawBowTieRiskEventBox(b.boxShapeClass, cls, ent("fire"), () => {}, Nothing, b.boxShape, bb));
-    const outline = (s: string) => s.match(/<path[^>]* d="[^"]*"/)?.[0].replace(/^.* d=/, "");
+    const outline = (s: string) => s.match(/<path d="([^"]*)" fill="none" stroke/)?.[1];
+    expect(outline(rect)).toBe("M10 10 L210 10 L210 130 L10 130 Z");
     for (const t of ["StateBox", "EventBox"] as const) {
       const o = shape(t);
       expect(outline(svg(drawBowTieRiskEventBox(o.boxShapeClass, cls, ent("fire"), () => {}, Nothing, o.boxShape, bb))))

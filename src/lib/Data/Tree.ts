@@ -56,14 +56,27 @@ export function unfoldForest<B, A>(f: (b: B) => [A, B[]], bs: readonly B[]): Tre
 }
 
 /** Render as an ASCII drawing (Haskell `drawTree`). */
-export function drawTree(t: Tree<string>): string {
-  return draw(t).join("\n");
+/** Haskell `unlines`: every line is followed by a newline. */
+function unlines(ls: readonly string[]): string {
+  return ls.map((l) => l + "\n").join("");
 }
+/** Haskell `lines`: a final newline does not start another line. */
+function hsLines(s: string): string[] {
+  if (s === "") return [];
+  const ls = s.split("\n");
+  if (s.endsWith("\n")) ls.pop();
+  return ls;
+}
+/** `drawTree = unlines . draw` */
+export function drawTree(t: Tree<string>): string {
+  return unlines(draw(t));
+}
+/** `drawForest = unlines . map drawTree` */
 export function drawForest(ts: Forest<string>): string {
-  return ts.map((t) => drawTree(t) + "\n").join("\n");
+  return unlines(ts.map(drawTree));
 }
 function draw(t: Tree<string>): string[] {
-  const lines = t.rootLabel.split("\n");
+  const lines = hsLines(t.rootLabel);
   const drawSub = (ts: Forest<string>): string[] => {
     if (ts.length === 0) return [];
     if (ts.length === 1) return ["|", ...shift("`- ", "   ", draw(ts[0]))];

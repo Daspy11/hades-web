@@ -44,7 +44,7 @@ import {
   exportTypes, fromDeltaScript, getBytes, getInterpreterError, getInterpreterIOAction, getInterpreterOpenDialog,
   getInterpreterOpenEntity, getInterpreterOpenProperties, getInterpreterSelection, getInterpreterSetHint,
   getInterpreterUpdate, interpretScript, isDeltaInstruction, mergeScripts, newTabLabel, processModelScripts,
-  renderForExport, selectionAdded, show_InterpreterResult,
+  renderForExport, selectionAdded, show_InterpreterResult, editorWindows,
 } from "./ModelDiagrams";
 
 /** Messages shown with "errorBox" (mocked). */
@@ -788,3 +788,53 @@ describe("renderForExport", () => {
   });
 });
 
+
+describe("editorWindows", () => {
+  it("reports the active editor and activates open editors (browser-history hooks)", () => {
+    const { st, dgm } = testModel();
+    // A second diagram.
+    const r = runModelEdit(cls, identity<TV>(), st, (c) => {
+      goToEntity(c, findId(st.stateModel, "P"));
+      return mkEntity(c, Dgm("D2", [])).entityId;
+    });
+    if (r.tag === "Left") throw new Error("model");
+    const model0 = r.value[0].updateNewModel;
+    const dgm2 = r.value[0].updateValue;
+    const win = Gtk.windowNew(Gtk.WindowTypeToplevel);
+    const active: ModelId[] = [];
+    const updates: Maybe<string>[] = [];
+    let fire: (s: Script) => void = () => {};
+    let activate: (m: ModelId, tag?: string) => boolean = () => false;
+    let editorWidget: Gtk.Widget | null = null;
+    const net = B.compile(() => {
+      const [scriptE, f] = B.newEvent<Script>();
+      fire = f;
+      const modelERef: B.Event<Model<TV>> = B.lazyE(() => modelE);
+      const modelC = Changes(modelERef, B.stepper(model0, modelERef));
+      const out = editorWindows<TV>(cls, win, Gtk.iconThemeGetDefault(), () => "model-package", model0, modelC,
+        B.never(), scriptE);
+      const modelE = B.mapE((u: ModelUpdate<TV, Maybe<string>>) => u.updateNewModel, out.editorUpdates);
+      B.reactimate(B.mapE((u: ModelUpdate<TV, Maybe<string>>) => () => updates.push(u.updateValue), out.editorUpdates));
+      B.reactimate(B.mapE((a: ActiveEntity<Pt, TV>) => () => active.push(a.activeWrapper.wrappedEntityId),
+        out.editorActiveEntity));
+      activate = out.editorActivate;
+      editorWidget = out.editorWidget;
+    });
+    B.actuate(net);
+    expect(editorWidget).not.toBeNull();
+    const open = (m: ModelId): Script => function* (c) {
+      yield* openDiagram<Pt, TV, TV>(cls, c, m);
+      return Nothing;
+    };
+    expect(activate(dgm)).toBe(false); // Not open yet.
+    fire(open(dgm));
+    fire(open(dgm2));
+    expect(active.slice(-1)).toEqual([dgm2]);
+    expect(active).toContain(dgm);
+    active.length = 0;
+    expect(activate(dgm)).toBe(true);
+    expect(active.slice(-1)).toEqual([dgm]);
+    expect(activate(dgm, "no such view")).toBe(false);
+    expect(updates.every((u) => u.tag === "Nothing")).toBe(true);
+  });
+});
