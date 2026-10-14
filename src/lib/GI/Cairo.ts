@@ -509,6 +509,11 @@ export async function surfaceWriteToPNG(s: ImageSurface): Promise<Uint8Array> {
   return s.toPngBytes();
 }
 
+/** `surfaceFinish`: finish the surface (a no-op for the browser surfaces, whose documents are read afterwards). */
+export function surfaceFinish(s: Surface): void {
+  s.finish();
+}
+
 /** `renderWith surface render` */
 export function renderWith<A>(s: Surface, render: Render<A>): A {
   const cr = s.context();

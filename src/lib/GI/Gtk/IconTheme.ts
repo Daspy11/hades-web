@@ -32,6 +32,8 @@ interface IconFile {
   readonly size: number;
   readonly context: string;
   readonly symbolic: boolean;
+  /** Virtual source path of the file (e.g. `/src/dsm/share/Diametric/48x48/x.png`). */
+  readonly path: string;
 }
 
 /** A theme: name → files, rooted at e.g. "/src/dsm/share/Diametric". */
@@ -51,7 +53,7 @@ class ThemeDir {
     const size = m ? parseInt(m[1], 10) : 0;
     const context = this.contexts.get(dir) ?? parts[parts.length - 1] ?? "";
     const list = this.icons.get(name) ?? [];
-    list.push({ url, size, context, symbolic });
+    list.push({ url, size, context, symbolic, path: this.root + "/" + rel });
     this.icons.set(name, list);
   }
 }
@@ -99,11 +101,21 @@ function bestFile(files: IconFile[], size: number): IconFile {
   return sorted.find((f) => f.size >= size) ?? sorted[sorted.length - 1];
 }
 
-export type IconLookupFlags = "IconLookupFlagsForceSize" | "IconLookupFlagsForceSvg" | "IconLookupFlagsUseBuiltin" | number;
+export type IconLookupFlags =
+  | "IconLookupFlagsForceSize" | "IconLookupFlagsForceSvg" | "IconLookupFlagsNoSvg" | "IconLookupFlagsUseBuiltin" | number;
 export const IconLookupFlagsForceSize: IconLookupFlags = "IconLookupFlagsForceSize";
+/** Never return an SVG icon. */
+export const IconLookupFlagsNoSvg: IconLookupFlags = "IconLookupFlagsNoSvg";
+/** Return an SVG icon even if a bitmap of the requested size is available. */
+export const IconLookupFlagsForceSvg: IconLookupFlags = "IconLookupFlagsForceSvg";
+
+function isSvgFile(f: IconFile): boolean {
+  return /\.svg$/i.test(f.path);
+}
 
 export class IconInfo {
-  constructor(readonly url: string, readonly size: number) {}
+  /** `filename`: the icon file's virtual path (`iconInfoGetFilename`); defaults to the URL. */
+  constructor(readonly url: string, readonly size: number, readonly filename: string = url) {}
 }
 
 export class IconTheme extends GObject {
@@ -135,14 +147,19 @@ export class IconTheme extends GObject {
     }
     return r;
   }
-  lookup(name: string, size: number): IconInfo | null {
+  lookup(name: string, size: number, flags: readonly IconLookupFlags[] = []): IconInfo | null {
+    const noSvg = flags.includes(IconLookupFlagsNoSvg);
+    const forceSvg = flags.includes(IconLookupFlagsForceSvg);
     for (const d of this.dirs()) {
-      const files = d.icons.get(name) ?? d.icons.get(name.replace(/-symbolic$/, ""));
+      let files = d.icons.get(name) ?? d.icons.get(name.replace(/-symbolic$/, ""));
+      if (files && noSvg) files = files.filter((f) => !isSvgFile(f));
+      else if (files && forceSvg && files.some(isSvgFile)) files = files.filter(isSvgFile);
       if (files && files.length > 0) {
         const f = bestFile(files, size);
-        return new IconInfo(f.url, size);
+        return new IconInfo(f.url, size, f.path);
       }
     }
+    if (noSvg) return null; // The symbolic fallback icons are all SVG.
     // Symbolic fallback for standard names.
     if (this.isDefault && !name.endsWith("-symbolic")) {
       const files = adwaitaTheme.icons.get(name + "-symbolic");
@@ -185,14 +202,23 @@ export function iconThemeSetCustomTheme(t: IconTheme, name: string | null): void
 export function iconThemeHasIcon(t: IconTheme, name: string): boolean {
   return t.lookup(name, 16) !== null;
 }
-export function iconThemeLookupIcon(t: IconTheme, name: string, size: number, _flags: unknown): IconInfo | null {
-  return t.lookup(name, size);
+/**
+ * `iconThemeLookupIcon`: the flags `IconLookupFlagsNoSvg` and `IconLookupFlagsForceSvg` choose
+ * between the bitmap and SVG files of an icon, as in GTK; other flags are ignored.
+ */
+export function iconThemeLookupIcon(t: IconTheme, name: string, size: number, flags: unknown): IconInfo | null {
+  return t.lookup(name, size, Array.isArray(flags) ? (flags as IconLookupFlags[]) : []);
 }
 export function iconInfoLoadIcon(i: IconInfo): Pixbuf {
   return pixbufNewFromUrlAtSize(i.url, i.size, i.size);
 }
+/**
+ * `iconInfoGetFilename`: the icon file's virtual path (for bundled theme icons a data-file path
+ * such as `/src/dsm/share/Diametric/48x48/x.png`, readable via `dataFileUrl`), so its extension
+ * is that of the file. Use `i.url` to load it.
+ */
 export function iconInfoGetFilename(i: IconInfo): string {
-  return i.url;
+  return i.filename;
 }
 /** `iconThemeLoadIcon`: throws (like a GError) if the icon is missing. */
 export function iconThemeLoadIcon(t: IconTheme, name: string, size: number, _flags: unknown): Pixbuf {

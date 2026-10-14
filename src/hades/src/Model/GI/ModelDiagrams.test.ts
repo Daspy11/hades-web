@@ -813,7 +813,11 @@ describe("editorWindows", () => {
       const modelC = Changes(modelERef, B.stepper(model0, modelERef));
       const out = editorWindows<TV>(cls, win, Gtk.iconThemeGetDefault(), () => "model-package", model0, modelC,
         B.never(), scriptE);
-      const modelE = B.mapE((u: ModelUpdate<TV, Maybe<string>>) => u.updateNewModel, out.editorUpdates);
+      // As "processModelUpdates" (App.ModelMain): only updates with a description change the model.
+      // (Feeding back every update would loop: a model change makes each open diagram run its
+      // "updateDiagram" action, whose update has no description.)
+      const modelE = B.mapE((u: ModelUpdate<TV, Maybe<string>>) => u.updateNewModel,
+        B.filterE((u: ModelUpdate<TV, Maybe<string>>) => u.updateValue.tag === "Just", out.editorUpdates));
       B.reactimate(B.mapE((u: ModelUpdate<TV, Maybe<string>>) => () => updates.push(u.updateValue), out.editorUpdates));
       B.reactimate(B.mapE((a: ActiveEntity<Pt, TV>) => () => active.push(a.activeWrapper.wrappedEntityId),
         out.editorActiveEntity));
