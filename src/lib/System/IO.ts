@@ -29,15 +29,16 @@ export function takeDirectory(p: FilePath): FilePath {
   const i = p.lastIndexOf("/");
   return i <= 0 ? (i === 0 ? "/" : ".") : p.slice(0, i);
 }
+/** `takeExtension`: as in System.FilePath, a name starting with a dot is all extension. */
 export function takeExtension(p: FilePath): string {
   const n = takeFileName(p);
   const i = n.lastIndexOf(".");
-  return i <= 0 ? "" : n.slice(i);
+  return i < 0 ? "" : n.slice(i);
 }
 export function takeBaseName(p: FilePath): string {
   const n = takeFileName(p);
   const i = n.lastIndexOf(".");
-  return i <= 0 ? n : n.slice(0, i);
+  return i < 0 ? n : n.slice(0, i);
 }
 export function dropExtension(p: FilePath): FilePath {
   const e = takeExtension(p);
@@ -63,9 +64,20 @@ export function splitExtension(p: FilePath): [FilePath, string] {
 export function hasExtension(p: FilePath): boolean {
   return takeExtension(p) !== "";
 }
+/** `takeExtensions`: all extensions of the file name, e.g. `".tar.gz"`. */
+export function takeExtensions(p: FilePath): string {
+  const n = takeFileName(p);
+  const i = n.indexOf(".");
+  return i < 0 ? "" : n.slice(i);
+}
+/**
+ * `isExtensionOf ext path`: true if the file's extensions end with `ext` (with or without the
+ * leading dot), case-sensitively, as in System.FilePath: `"gz" `isExtensionOf` "a.tar.gz"` and
+ * `"tar.gz" `isExtensionOf` "a.tar.gz"` are both true.
+ */
 export function isExtensionOf(ext: string, p: FilePath): boolean {
   const e = ext.startsWith(".") ? ext : "." + ext;
-  return takeExtension(p).toLowerCase() === e.toLowerCase();
+  return takeExtensions(p).endsWith(e);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -156,11 +168,23 @@ async function blobOf(p: FilePath): Promise<Blob> {
   }
 }
 
+/** The bytes of a Blob. Uses FileReader where `Blob.arrayBuffer` is missing (e.g. jsdom). */
+async function blobBytes(b: Blob): Promise<Uint8Array> {
+  if (typeof b.arrayBuffer === "function") return new Uint8Array(await b.arrayBuffer());
+  return await new Promise<Uint8Array>((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(new Uint8Array(r.result as ArrayBuffer));
+    r.onerror = () => reject(r.error);
+    r.readAsArrayBuffer(b);
+  });
+}
+
 export async function readFileBytes(p: FilePath): Promise<Uint8Array> {
-  return new Uint8Array(await (await blobOf(p)).arrayBuffer());
+  return await blobBytes(await blobOf(p));
 }
 export async function readFileText(p: FilePath): Promise<string> {
-  return await (await blobOf(p)).text();
+  const b = await blobOf(p);
+  return typeof b.text === "function" ? await b.text() : new TextDecoder().decode(await blobBytes(b));
 }
 /** `doesFileExist` */
 export async function doesFileExist(p: FilePath): Promise<boolean> {
