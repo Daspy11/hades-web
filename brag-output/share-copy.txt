@@ -1,0 +1,1 @@
+The Diametric Safety Case Manager was a Haskell GTK desktop app. Now it runs in a browser tab: all 41,280 lines of HADES ported module by module to TypeScript, same GSN and bow tie diagrams, same dialogs, same undo, and the Back button moves between diagrams.
