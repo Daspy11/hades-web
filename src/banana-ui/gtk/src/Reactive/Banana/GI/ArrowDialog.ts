@@ -1185,7 +1185,7 @@ function renderGadget_Cond(
       const d = pg._0;
       const initial1 = gdFmap((x: any) => fromRight(d, getter(x)), initial);
       const e1 = B.filterJust(B.mapE((x: GD) => matchGadgetData(getter, x), e));
-      const b1 = B.mapB((x: GD) => GadgetData(x._gdOk, fromRight(d, getter(x._gdValue))), b);
+      const b1 = B.mapB(gdFmapF((x: any) => fromRight(d, getter(x))), b);
       const o = renderGadget(iconTheme, wInit, env, initial1, envC, e1, b1, gDot(arr(setter), pg._2));
       return [(x: any) => isRight(getter(x)), [o, n]];
     });
@@ -1246,7 +1246,7 @@ function renderGadget_UnionTab(
       const d = pg._0;
       const initial1 = gdFmap((x: any) => fromRight(d, getter(x)), initial);
       const e1 = B.filterJust(B.mapE((x: GD) => matchGadgetData(getter, x), e));
-      const b1 = B.mapB((x: GD) => GadgetData(x._gdOk, fromRight(d, getter(x._gdValue))), b);
+      const b1 = B.mapB(gdFmapF((x: any) => fromRight(d, getter(x))), b);
       const subOutput = renderGadget(iconTheme, wInit, env, initial1, envC, e1, b1, gDot(arr(setter), pg._2));
       const w0 = boxWidgets(wInit, "Vertical", subOutput.gadgetView);
       const widget = w0.tag === "Just" ? w0.value : Gtk.toWidget(Gtk.labelNew("")); // Blank

@@ -53,9 +53,9 @@ import {
   type Element, type GenericContext, type GenericDiagramClass, type Graphic,
   AppearanceDef, Arrow, Avatar_Element, Box, Comment, Connectable_Element, ElemArrow, ElemBox,
   ElemComment, ElemLink, ErrorGraphic, GenericContext as mkGenericContext, HasId_Element, JSON_Comment,
-  JSON_Element, JSON_Graphic, Link, NoAvatar, SimpleArrow, SimpleBox, VectorGraphic, Viewable_Element,
+  JSON_Element, JSON_Graphic, Link, NoAvatar, PixelGraphic, SimpleArrow, SimpleBox, VectorGraphic, Viewable_Element,
   _ElemArrow, _ElemBox, _ElemComment, _ElemLink, append_AppearanceDef, arrowShape, base64DecodeLenient,
-  base64Encode, boxPeg, compileAppearance, def_Comment, def_Link, diagramAppearanceDef,
+  base64Encode, boxPeg, compileAppearance, decodedGraphic, def_Comment, def_Link, diagramAppearanceDef,
   diagramTypeClassDefaults, edgeLinks, elementDialog, elementMapAvatars, eq_Box, isLinkable, linkTarget,
   mempty_AppearanceDef, newArrowEntityTool, newBoxEntityTool, newCommentTool, show_Link,
 } from "./GenericDiagram";
@@ -514,6 +514,37 @@ describe("JSON", () => {
     }
     expect(Array.from(base64DecodeLenient("AAEC\n+vv8/f7/QQ"))).toEqual(Array.from(bytes));
     expect(Array.from(base64DecodeLenient("!!QUJD!!"))).toEqual([65, 66, 67]);
+    // Padding is skipped in the first two places of a group and ends the data in the last two.
+    expect(Array.from(base64DecodeLenient("Q=UJD"))).toEqual([65, 66, 67]);
+    expect(Array.from(base64DecodeLenient("=QUJD"))).toEqual([65, 66, 67]);
+    expect(Array.from(base64DecodeLenient("QQ=AQUJD"))).toEqual([65]);
+    expect(Array.from(base64DecodeLenient("QUI=QUJD"))).toEqual([65, 66]);
+    expect(Array.from(base64DecodeLenient("QUJD="))).toEqual([65, 66, 67]);
+    expect(Array.from(base64DecodeLenient("Q"))).toEqual([]);
+  });
+
+  it("treats a pixel image the browser cannot decode as the Haskell ErrorGraphic", () => {
+    // (Pixbufs are shared per image data, so these bytes are used by no other test.)
+    const raw = { image: "BwgJ\n", extra: true };
+    const g = JSON_Graphic.parseJSON(raw);
+    if (g.tag !== "PixelGraphic") throw new Error("not a pixel graphic");
+    expect(Array.from(g._0)).toEqual([7, 8, 9]);
+    // While it is (or could be) decoding it is a pixel image.
+    expect(decodedGraphic(g)).toBe(g);
+    expect(JSON_Graphic.toJSON(g)).toEqual({ image: "BwgJ" });
+    expect(equals<Graphic>(g, PixelGraphic(Uint8Array.from([7, 8, 9]), g._1))).toBe(true);
+    // Once the browser has failed to decode it, it is the raw JSON with the decoder's message.
+    g._1.failed = true;
+    const d = decodedGraphic(g);
+    expect(d.tag === "ErrorGraphic" && [d._0, d._1]).toEqual([raw, "Error during image decoding."]);
+    expect(JSON_Graphic.toJSON(g)).toEqual(raw);
+    expect(equals<Graphic>(g, ErrorGraphic({ image: "BwgJ\n", extra: true }, "other"))).toBe(true);
+    expect(equals<Graphic>(g, PixelGraphic(Uint8Array.from([7, 8, 9]), g._1))).toBe(false);
+    expect(JSON_Comment.toJSON(Comment("c", CommentBox(NoBox), Just(g), "t"))).toMatchObject({ graphic: raw });
+    // A pixel graphic that was not read from JSON keeps its data.
+    const own = PixelGraphic(Uint8Array.from([7, 8, 9]), g._1);
+    expect(decodedGraphic(own)).toBe(own);
+    expect(JSON_Graphic.toJSON(own)).toEqual({ image: "BwgJ" });
   });
 
   it("keeps undecodable graphics as raw JSON", () => {
@@ -922,6 +953,40 @@ describe("diagram editing", () => {
     // Arrows cannot be resized.
     const a = ElemArrow(tm.arrowE);
     expect(ed.run((d) => ecls.itemResize(d, [1, 1], a))).toBe(a);
+  });
+
+  it("lays out comment graphics, including undecodable ones", () => {
+    const ed = new Editor(tm.st);
+    const draw = (g: Maybe<Graphic>): string => render(ed.run((d) =>
+      ecls.itemView(d, ElemComment(Comment(did(), CommentBox(BB(P(0, 0), P(300, 300))), g, "Caption")))));
+    /** The y coordinate of the caption text. */
+    const captionY = (svg: string): number => {
+      const m = /<text[^>]*\by="([-\d.]+)"[^>]*>Caption</.exec(svg);
+      if (m === null) throw new Error("no caption in " + svg);
+      return Number(m[1]);
+    };
+    const plain = draw(Nothing);
+    // Raw JSON that could not be decoded is kept, and its error message is shown between rules.
+    const bad = JSON_Graphic.parseJSON({ svg: "not svg" });
+    const withError = draw(Just(bad));
+    expect(withError).toContain("Error during image decoding.");
+    expect(captionY(withError)).toBeGreaterThan(captionY(plain));
+    // An SVG reserves its height (it is drawn once the browser has loaded it).
+    const svg = JSON_Graphic.parseJSON({ svg: "<svg xmlns='http://www.w3.org/2000/svg' width='120' height='80'/>" });
+    expect(captionY(draw(Just(svg))) - captionY(plain)).toBeCloseTo(80, 0);
+    // A pixel image takes no space until it has loaded; one that the browser cannot decode is
+    // shown with the message GdkPixbuf's GError gives in the Haskell program.
+    const px = JSON_Graphic.parseJSON({ image: base64Encode(Uint8Array.from([1, 2, 3])) });
+    if (px.tag !== "PixelGraphic") throw new Error("not a pixel graphic");
+    expect(draw(Just(px))).not.toContain("Error during image decoding.");
+    expect(captionY(draw(Just(px)))).toBe(captionY(plain));
+    px._1.failed = true;
+    expect(draw(Just(px))).toContain("Error during image decoding.");
+    // A loaded image consumes its height, scaled down to the available width (300 of 560).
+    const big = JSON_Graphic.parseJSON({ image: base64Encode(Uint8Array.from([4, 5, 6])) });
+    if (big.tag !== "PixelGraphic") throw new Error("not a pixel graphic");
+    Object.assign(big._1, { loaded: true, width: 560, height: 100 });
+    expect(captionY(draw(Just(big))) - captionY(plain)).toBeCloseTo(100 * 300 / 560, 1);
   });
 
   it("connects arrows only where the diagram type allows", () => {

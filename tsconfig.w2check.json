@@ -1,8 +1,0 @@
-{
-  "extends": "./tsconfig.json",
-  "include": [
-    "src/banana-ui/webits/src/Network/Webits/ArrowDialog.ts",
-    "src/banana-ui/webits/src/Network/Webits/Table.ts",
-    "src/scratch/w2Demo.ts", "src/vite-env.d.ts"
-  ]
-}

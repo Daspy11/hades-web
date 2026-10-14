@@ -1,6 +1,6 @@
 # gsn: GSN.Model
 
-`src/dsm/gsn/GSN/Model.ts` (tests: `Model.test.ts` next to it, 113 tests). Every definition of
+`src/dsm/gsn/GSN/Model.ts` (tests: `Model.test.ts` next to it, 114 tests). Every definition of
 `dsm/gsn/GSN/Model.hs` is ported, exported or not. Demo: `src/scratch/gsnDemo.ts`
 (`?demo=gsn`, `&file=1..4` picks the example model, `&page=<n>` the notebook page).
 
@@ -45,9 +45,11 @@
   `d: DiagramEntity<GsnElement<V>, DiagramAppearance<GsnDiagramType<V>, V>>`. The GADT's packed
   `HasDiagrams` dictionary is not stored. Instances: `eq_ModelSubtype`, `JSON_ModelSubtype(cls)`,
   `Reflective_ModelSubtype(cls)` (aliases `eq_GsnItem`, `JSON_GsnItem`, `Reflective_GsnItem`).
-  Both functions build a new object per call (diagram parts are built lazily on first use, so they
-  can be referenced while the model dictionary is being built); cache them in the model dictionary.
-  `reflectiveDefaults` is a memoised getter.
+  The codec and the Reflective dictionary are cached per `cls` (WeakMap), and their diagram parts
+  (`JSON_DiagramEntity`/`Reflective_DiagramEntity` over `Avatar_Element(DiagramTypeClass_GsnDiagramType(cls))`)
+  are built on first use, so a model dictionary (SafetyModel) may call them from its own members
+  while it is being built, as long as it does not *use* them during construction.
+  `reflectiveDefaults` is a memoised getter. `eq_ModelSubtype` compares diagrams with `eq_DiagramEntity`.
 * `GsnNode`: tagged union with record fields; constructors `Goal(name, text, developed,
   instantiated)`, `Strategy(...)` (same), `Solution/Context/Assumption/Justification/GsnOption(name,
   text, instantiated)`. `show_GsnNode`, `JSON_GsnNode`. Lenses `gsnNodeName`, `gsnNodeText`,
@@ -89,9 +91,15 @@
   raw "Other" entities) that loads the example files; reuse it for DSM.SafetyCase tests. It is
   typed as `ClsT` (the constraint set spelt out) and cast to `GsnClass<TV>`, so that it keeps its
   types even if `GsnClass` degrades to `any` (as it did while `Model.Report.Base` was missing).
+* The demo's last page, "GSN Notation", shows every element (goal, strategy, solution, context,
+  assumption, justification, option, evidence), context/support arrows with each cardinality, a
+  trace, and the decorations (laid out so that no arrow crosses a box). Toolbar tools and the
+  connection rules were exercised in the browser (box tool + drag adds "G7"; a support arrow from a
+  goal does not connect its head to a justification; goal → goal connects both ends).
 * The demo drives the real GenericDiagram editor (`makeDrawingGtk` with `Avatar_Element`) inside
   `ModelScript`s on the `_GsnItem` subtype, answering script instructions like a user pressing OK.
 
 ## Toolkit
 
-* No toolkit changes.
+* No toolkit changes. (The `emblem-symbolic-link` icon of GenericDiagram's "Link" tool is the
+  pale modern Adwaita one and is barely visible on the toolbar; not a GSN issue.)

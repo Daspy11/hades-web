@@ -3,7 +3,7 @@
  * viewport; other toplevels (windows, dialogs, message dialogs, popovers and popup menus) are
  * rendered as Radix overlays. Keyboard accelerators registered on windows are handled here.
  */
-import React, { useEffect, useRef, useSyncExternalStore } from "react";
+import React, { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import * as RDialog from "@radix-ui/react-dialog";
 import * as AlertDialog from "@radix-ui/react-alert-dialog";
@@ -12,7 +12,7 @@ import * as Tooltip from "@radix-ui/react-tooltip";
 import { toplevels, type Widget, stripMnemonic } from "./Core";
 import * as W from "./Widgets";
 import { ColorChooserDialog } from "./Choosers";
-import { useWidget, WidgetView } from "./Render";
+import { keepBoxMinimums, useWidget, WidgetView } from "./Render";
 import { PopupMenuView } from "./RenderBars";
 import { iconUrl } from "./IconTheme";
 import { accelOfEvent } from "../Gio";
@@ -48,6 +48,18 @@ function useDrag(): [React.RefObject<HTMLDivElement>, (e: React.PointerEvent) =>
   return [ref, onPointerDown];
 }
 
+/**
+ * Ref callback for the content element of a dialog or window: its vertical boxes are never
+ * squeezed below their content (see `keepBoxMinimums`).
+ */
+function useBoxMinimums(): (el: HTMLElement | null) => void {
+  const stop = useRef<(() => void) | null>(null);
+  return useCallback((el: HTMLElement | null) => {
+    stop.current?.();
+    stop.current = el ? keepBoxMinimums(el) : null;
+  }, []);
+}
+
 function TitleBar({ title, onClose, onPointerDown }: { title: string; onClose: () => void; onPointerDown: (e: React.PointerEvent) => void }) {
   return (
     <div className="gtk-titlebar" onPointerDown={onPointerDown}>
@@ -63,6 +75,7 @@ function TitleBar({ title, onClose, onPointerDown }: { title: string; onClose: (
 function DialogView({ d }: { d: W.Dialog }) {
   useWidget(d);
   const [ref, onDrag] = useDrag();
+  const contentRef = useBoxMinimums();
   if (d.destroyed || !d.visible) return null;
   const sizeStyle: React.CSSProperties = {};
   if (d.defaultWidth > 0) sizeStyle.width = `min(${d.defaultWidth}px, 95vw)`;
@@ -97,7 +110,7 @@ function DialogView({ d }: { d: W.Dialog }) {
           }}
         >
           <TitleBar title={d.title} onClose={() => d.requestClose()} onPointerDown={onDrag} />
-          <div className="gtk-dialog-content">
+          <div className="gtk-dialog-content" ref={contentRef}>
             <WidgetView w={d.contentArea} layout={{ flex: "1 1 auto", minHeight: 0 }} />
           </div>
           {d.actionArea.children.length > 0 ? (
@@ -267,6 +280,7 @@ function ColorChooserView({ d }: { d: ColorChooserDialog }) {
 function WindowView({ w }: { w: W.Window }) {
   useWidget(w);
   const [ref, onDrag] = useDrag();
+  const contentRef = useBoxMinimums();
   useEffect(() => {
     if (w.isMain && w.title) document.title = w.title;
   });
@@ -308,7 +322,7 @@ function WindowView({ w }: { w: W.Window }) {
           }}
         >
           <TitleBar title={w.title} onClose={() => w.requestClose()} onPointerDown={onDrag} />
-          <div className="gtk-dialog-content" style={{ padding: 0 }}>
+          <div className="gtk-dialog-content" style={{ padding: 0 }} ref={contentRef}>
             {c ? <WidgetView w={c} layout={{ flex: "1 1 auto", minHeight: 0 }} /> : null}
           </div>
         </RDialog.Content>

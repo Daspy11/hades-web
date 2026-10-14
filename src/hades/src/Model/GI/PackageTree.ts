@@ -40,7 +40,7 @@ import * as U from "@/lib/Data/UUID";
 import { Just, Nothing, catMaybes, fromNullable, isJust, traverseMaybe, type Maybe } from "@/lib/Data/Maybe";
 import { Node, fmapTree, type Forest, type Tree } from "@/lib/Data/Tree";
 import { identity, review, view } from "@/lib/Control/Lens";
-import { error, modifyIORef, newIORef, readIORef, readInt, round, showInt, writeIORef, type IORef } from "@/lib/Prelude";
+import { absurd, error, modifyIORef, newIORef, readIORef, readInt, round, showInt, writeIORef, type IORef } from "@/lib/Prelude";
 import type { Changes } from "@/banana-ui/base/Reactive/Banana/Common";
 import { reactimate1, reactimate1_ } from "@/banana-ui/base/Reactive/Banana/Common";
 import type { Menu } from "@/banana-ui/base/Reactive/Banana/Menu";
@@ -419,6 +419,8 @@ export function updateGtkTree<V>(
       }
       case "ModelOther":
         return;
+      default:
+        return absurd(l);
     }
   };
   logs.forEach(doUpdate);
@@ -736,6 +738,7 @@ export function modelWidget<P, V>(
     }, activateEvent),
   ));
   const activationUpdates = B.mapE((e: Maybe<Entity<V>>) => cls.editableActivation(e), activatedItem);
+  // Web: the error boxes of these handlers are shown without waiting for them to be closed.
   const stop1 = reactimate1(B.mapE((err: ModelError) => () => void modelErrorWarning(vw, err), activationError));
   // Set up event for menus.
   type MenuF = Maybe<Menu<Script<P, V>>>;
@@ -950,6 +953,7 @@ export function dragTargets(): Gtk.TargetEntry[] {
 
 /** Pop up a warning about a failed model edit on the event. */
 export function modelErrorWarningOn(parent: Gtk.Widget, errE: B.Event<ModelError>): void {
+  // Web: the error box is shown without waiting for it to be closed.
   const stop = reactimate1(B.mapE((err: ModelError) => () => void modelErrorWarning(parent, err), errE));
   Gtk.onWidgetDestroy(parent, stop);
 }
@@ -966,6 +970,8 @@ export function modelErrorWarning(parent: Gtk.Widget, err: ModelError): Promise<
         "\n\nPlease save your work in a new file and report this bug.");
     case "UserError":
       return errorBox(parent, err._0);
+    default:
+      return absurd(err);
   }
 }
 

@@ -423,16 +423,25 @@ export function show_FTSelection(s: FTSelection): string {
   return "FTSelection {ftsKey = " + String(s.ftsKey) + ", ftsSelected = " + showBool(s.ftsSelected) + "}";
 }
 
-/** `instance FromJSON FTSelection` (the key is a string holding an integer; `read` fails hard). */
+/**
+ * `instance FromJSON FTSelection` (the key is a string holding an integer).
+ *
+ * TypeScript: Haskell's `read <$> (v .: "k")` is lazy, so the parse succeeds whatever the string
+ * holds and an unreadable key fails ("Prelude.read: no parse") only when `ftsKey` is used. That
+ * case is reproduced with a getter that throws.
+ */
 export const FromJSON_FTSelection: J.FromJSON<FTSelection> = {
   parseJSON: (v) =>
     J.withObject(
       "Fancytree Selection event",
       (o) => {
         const k = J.field(o, "k", J.stringJ);
+        const s = J.field(o, "s", J.boolJ);
         const n = readInt(k);
-        if (n.tag === "Nothing") throw new Error("Prelude.read: no parse");
-        return FTSelection(n.value, J.field(o, "s", J.boolJ));
+        if (n.tag === "Just") return FTSelection(n.value, s);
+        const lazy = { ftsSelected: s } as { ftsKey: number; ftsSelected: boolean };
+        Object.defineProperty(lazy, "ftsKey", { enumerable: true, get: (): number => error("Prelude.read: no parse") });
+        return lazy;
       },
       v,
     ),
@@ -1125,7 +1134,7 @@ function renderGadget_Exec(elmer: ElmerEnv, env: AnyEnv, i: AnyIn, gadgetF: (a: 
   //   mapM_ deleteWebit childs
   //   mapM_ (showWebit parent) $ gadgetView o
   //   return $ qualifyOutput (v ^. gdOk) o
-  // TypeScript: `deleteWebit` is asynchronous, so when there are old children to delete the
+  // Web: `deleteWebit` is asynchronous, so when there are old children to delete the
   // result is a Promise. (The first rendering has none, so it is synchronous.)
   const doExec = (elmer1: ElmerEnv, parent: WebitContainer, v: GadgetData<AnyGadget>): AnyOut | Promise<AnyOut> => {
     const o = renderGadget(elmer1, env, fmapIn((p: readonly [any, any]) => p[1], i), v._gdValue);
@@ -1532,7 +1541,9 @@ function renderGadget_Intercept(elmer: ElmerEnv, env: AnyEnv, i: AnyIn, dblClick
   const i1 = atomicallySync(() => i.tStateDup());
   const inner = renderGadget(elmer, env, innerInput, g);
   const prop = dblClick ? "ondblclick" : "onclick";
-  // Web: the Haskell builds the attribute from the id of the container it is creating (mdo); the
+  // Web: the Haskell builds the attribute from the id of the container it is creating (mdo).
+  // `makeWebitContainer1` sends the attribute text to the browser before it returns, which
+  // forces that id, so the original fails here with the fixIO "cyclic evaluation" error. The
   // attribute is set right after creating the container instead.
   const box = makeWebitContainer1(elmer, "div", []);
   const script = webitEvent(J.unitJ, WebitClass_WebitContainer.webitId(box), null);
@@ -1822,6 +1833,8 @@ function renderGadget_Validate(elmer: ElmerEnv, env: AnyEnv, i: AnyIn, f: (e: an
   const setStyle = (elmer1: ElmerEnv, g1: AnyOut, b: boolean): void => elmerSend(elmer1, g1.gadgetView.map((w) => setJS(b, w)).join(""));
   const inner = renderGadget(elmer, env, i, g);
   // checkOk = f <$> env <*> (view gdValue <$> i) <*> (view gdValue <$> gadgetOutput inner)
+  // Faithful: `checkOk` and `output` read the same (not duplicated) event streams, so the style
+  // daemon below usually consumes the inner gadget's events before they reach the output.
   const checkOk: TState<boolean, boolean> = ap_TState(
     ap_TState(
       fmap_TState((e1: any) => (i1: any) => (o1: any) => f(e1, i1, o1), env),
@@ -1855,6 +1868,7 @@ function renderGadget_ValidateText(elmer: ElmerEnv, env: AnyEnv, i: AnyIn, f: (e
   const warning = makeWebStatic(elmer, H.with_(H.p(H.mempty_Html), HA.style("backgroundColor:LightCoral;text-align:center;")));
   for (const w of inner.gadgetView) showWebit(WebitClass_WebitItem, elmer, box1, w);
   showWebit(WebitClass_WebStatic, elmer, box1, warning);
+  // Faithful: shares its event streams with `output`, as in `Validate`.
   const checkOk: TState<boolean, Maybe<T.Text>> = ap_TState(
     ap_TState(
       fmap_TState((e1: any) => (i1: any) => (o1: any) => f(e1, i1, o1), env),
@@ -2599,8 +2613,15 @@ function renderGadget_Table_Just(
   const rowUpdates = mkWebitPopupSelect(elmer, e, selector, (): [number, any] => {
     const row = readTChan(clickRows);
     const v = webit.webitState.tStateBehaviour();
-    if (row < 0 || row >= v.length) return error("Prelude.!!: index too large");
-    return [row, v[row]];
+    // `return (row, v !! row)`. TypeScript: the element is lazy in Haskell, so a row number that
+    // the table does not have yet fails (with the GHC 8.10 `!!` message) only when the value is
+    // used, after this transaction has consumed the click. A getter reproduces that.
+    const r: [number, any] = [row, undefined];
+    Object.defineProperty(r, 1, {
+      enumerable: true,
+      get: (): any => (row < 0 ? error("Prelude.!!: negative index") : row >= v.length ? error("Prelude.!!: index too large") : v[row]),
+    });
+    return r;
   });
   const i1 = tStateDupIO(i);
   const [out, outWriter] = newTStateIO<boolean, GadgetData<any>>(initial);
@@ -3152,6 +3173,7 @@ function renderGadget_Trace(
           () => Right([i1.tStateBehaviour(), o1.tStateEvent()]),
         ),
     );
+    // Web: `putStrLn` (standard output of the server) is the browser console.
     if (dat.tag === "Left") {
       const [b, v] = dat.value;
       console.log(msg + " input = " + "(" + showBool(b) + "," + T.showText(inF(v._gdValue)) + ")");

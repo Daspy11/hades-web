@@ -93,6 +93,14 @@ Data files from the original `share` directories are bundled. Use
 `System/Hades/DataFiles` and `lib/System/Paths.ts` (`getDataDir`, `dataFileUrl`).
 `Gtk.builderNewFromFile` resolves `.glade` files that were registered with
 `Gtk.registerBuilderText(path, xml)` (import the file with `?raw`).
+`listDataDirectory(getDataDir(pkg) + "/dir")` is `listDirectory` for a bundled data folder.
+`GLib.filenameToUri(path, null)` (`@/lib/GI/GLib`) turns a data file path or a `/builtin/`
+path into its (absolute) URL, and `Gtk.showUriOnWindow(null, uri, 0)` opens a URI in a new tab.
+
+`Gtk.imageNewFromFile(url)` takes a URL (use `dataFileUrl` for a data file). The image is drawn
+at its natural size, centred in its allocation, as in GTK. An SVG file gets the bundled fonts
+it names (Roboto, Cantarell) embedded (`SvgFonts.ts`), since an SVG drawn as an `<img>` cannot
+use the page's web fonts, whereas librsvg uses the system fonts.
 
 ## Tree models and cell layouts
 
@@ -110,6 +118,8 @@ Data files from the original `share` directories are bundled. Use
   `Gtk.mvCellLayoutSetDataFunction` is similar.
 * `cellLayoutPackStart`, `cellLayoutAddAttribute` and the other layout functions work on both
   `TreeViewColumn` and `ComboBox`.
+* `treeViewSetGridLines` and `treeViewSetEnableTreeLines` are drawn (tree lines as GTK's dotted
+  lines in the first column, in the Adwaita tree-line colour).
 * Editing works as in GTK. Set `editable: true` on a `CellRendererText`, then connect
   `onCellRendererTextEdited(cell, (pathStr, newText) => ...)`. The editable passed to
   `onCellRendererEditingStarted` is a `Gtk.CellEditable`: a `ComboBox` for a `CellRendererCombo`

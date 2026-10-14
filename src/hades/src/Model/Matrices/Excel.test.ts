@@ -11,15 +11,19 @@ import { toXlsxEither, fromXlsx, CellBool, CellDouble, CellText, NormalFormula }
 import { formatted, minimalStyleSheet } from "@/lib/Codec/Xlsx/Formatted";
 import { evalModelEdit, nameField, Name, type Model } from "@/hades/src/Model/Abstract/PackageTree";
 import { identity } from "@/lib/Control/Lens";
-import { migrateField } from "@/hades/src/Model/Reflection/Types";
+import {
+  BuiltInDef, DecoBool, DecoBoolDef, DecoIntDef, DecoRange, DecoRealDef, Field, migrateField,
+} from "@/hades/src/Model/Reflection/Types";
 import { ExtBool, ExtDate, ExtInt, ExtNone, ExtReal, ExtText } from "@/hades/src/Model/Reflection/Values";
+import { sRGB24 } from "@/lib/Data/Colour";
+import { def_FormattedCell } from "@/lib/Codec/Xlsx/Formatted";
 import {
   ColumnGroup, ExprColumn, FieldColumn, FieldColumnData, LookupColumn, Matrix, MatrixColumn, QueryColumn,
   SortOrder, def_FieldColumnData,
 } from "./Base";
 import {
   extValueToExcel, makeFieldCell, makeHeaderCell, matrixAlignment, matrixBook, matrixBorders, matrixCells,
-  matrixColumn, matrixErrorsDialog, matrixExportDialog, matrixFont, matrixFormat, matrixWarningsDialog,
+  matrixColumn, matrixErrorsDialog, matrixExportDialog, matrixFont, matrixFormat, matrixWarningsDialog, tabulateCell,
 } from "./Excel";
 import { naturalOrder } from "@/hades/src/Text/NaturalOrder";
 import { findEntity, readRiskModel, riskClass, type RV } from "./testing/RiskModel";
@@ -58,11 +62,38 @@ const rootPackage = (): string => {
 /** Write the workbook and dump it with openpyxl. */
 function dump(bytes: Uint8Array): any {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mx-xlsx-"));
-  const file = path.join(dir, "matrix.xlsx");
-  fs.writeFileSync(file, bytes);
-  const out = execFileSync("python3", ["-I", path.join(__dirname, "testing", "dumpXlsx.py"), file], { encoding: "utf8" });
-  return JSON.parse(out);
+  try {
+    const file = path.join(dir, "matrix.xlsx");
+    fs.writeFileSync(file, bytes);
+    const out = execFileSync("python3", ["-I", path.join(__dirname, "testing", "dumpXlsx.py"), file], { encoding: "utf8" });
+    return JSON.parse(out);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 }
+
+/** Colours and fields for the decorated field types (the example model has none). */
+const red = sRGB24(255, 0, 0), green = sRGB24(0, 128, 0), blue = sRGB24(0x34, 0x65, 0xa4);
+const decoFields: Field[] = [
+  Field(false, fid("Flag"), "Flag", "One", DecoBoolDef(DecoBool(Nothing, Just([red, green] as const)))),
+  Field(false, fid("Plain flag"), "Plain flag", "One", DecoBoolDef(DecoBool(Just(["a", "b"] as const), Nothing))),
+  Field(false, fid("Score"), "Score", "One", DecoIntDef(DecoRange<number>([Just(0), Just(10)], [
+    [[Nothing, Just(3)], [Nothing, Just(green)]],
+    [[Just(4), Just(6)], [Just("icon"), Nothing]],
+    [[Just(7), Nothing], [Nothing, Just(red)]],
+  ]))),
+  Field(false, fid("Ratio"), "Ratio", "One", DecoRealDef(DecoRange<number>([Nothing, Nothing], [
+    [[Nothing, Just(0.5)], [Nothing, Just(blue)]],
+  ]))),
+  Field(false, fid("Done"), "Done", "One", BuiltInDef("ModelBool")),
+  Field(false, fid("Weight"), "Weight", "One", BuiltInDef("ModelReal")),
+  Field(false, fid("Notes"), "Notes", "One", BuiltInDef("ModelNote")),
+];
+/** The example model with the decorated fields added. */
+const decoModel: Model<RV> = {
+  ...model,
+  modelFields: decoFields.reduce((m, f) => M.insert(f.fieldId, f, m), model.modelFields),
+};
 
 const ref = (r: number, c: number) => String.fromCharCode(64 + c) + String(r);
 const excelDay = (iso: string) =>
@@ -152,6 +183,58 @@ describe("Formats and cells", () => {
     for (const c of [unknownItem, textCell, noField, wrongType]) expect(c._formattedFormat._formatFill).toEqual(Nothing);
   });
 
+  it("colours decorated booleans and numbers", () => {
+    const r = evalModelEdit(riskClass, identity<RV>(), decoModel, (ctx) => ({
+      flagFalse: makeFieldCell(ctx, fid("Flag"), ExtBool(false), Nothing),
+      flagTrue: makeFieldCell(ctx, fid("Flag"), ExtBool(true), Nothing),
+      flagNone: makeFieldCell(ctx, fid("Flag"), ExtNone, Nothing),
+      plain: makeFieldCell(ctx, fid("Plain flag"), ExtBool(true), Nothing),
+      low: makeFieldCell(ctx, fid("Score"), ExtInt(2), Nothing),
+      mid: makeFieldCell(ctx, fid("Score"), ExtInt(5), Nothing),
+      high: makeFieldCell(ctx, fid("Score"), ExtInt(9), Nothing),
+      scoreText: makeFieldCell(ctx, fid("Score"), ExtText("9"), Nothing),
+      ratioLow: makeFieldCell(ctx, fid("Ratio"), ExtReal(0.25), Nothing),
+      ratioHigh: makeFieldCell(ctx, fid("Ratio"), ExtReal(0.75), Nothing),
+      ratioInt: makeFieldCell(ctx, fid("Ratio"), ExtInt(0), Nothing),
+      done: makeFieldCell(ctx, fid("Done"), ExtBool(true), Nothing),
+    }));
+    if (r.tag === "Left") throw new Error("edit failed");
+    const fillOf = (c: typeof r.value.low): string | null => {
+      const f = c._formattedFormat._formatFill;
+      if (f.tag === "Nothing" || f.value._fillPattern.tag === "Nothing") return null;
+      const p = f.value._fillPattern.value;
+      expect(p._fillPatternType).toEqual(Just("PatternTypeSolid"));
+      expect(p._fillPatternBgColor).toEqual(p._fillPatternFgColor);
+      return p._fillPatternFgColor.tag === "Just" && p._fillPatternFgColor.value._colorARGB.tag === "Just"
+        ? p._fillPatternFgColor.value._colorARGB.value
+        : "?";
+    };
+    const v = r.value;
+    // DecoBool colours are (False, True); hex digits are upper case.
+    expect(fillOf(v.flagFalse)).toBe("FFFF0000");
+    expect(fillOf(v.flagTrue)).toBe("FF008000");
+    expect(fillOf(v.flagNone)).toBeNull();
+    expect(fillOf(v.plain)).toBeNull();
+    // The first matching range wins; a range with no colour (or no range) gives no fill.
+    expect(fillOf(v.low)).toBe("FF008000");
+    expect(fillOf(v.mid)).toBeNull();
+    expect(fillOf(v.high)).toBe("FFFF0000");
+    expect(fillOf(v.scoreText)).toBeNull();
+    expect(fillOf(v.ratioLow)).toBe("FF3465A4");
+    expect(fillOf(v.ratioHigh)).toBeNull();
+    expect(fillOf(v.ratioInt)).toBeNull();
+    expect(fillOf(v.done)).toBeNull();
+    // The value itself is unchanged.
+    expect(v.high._formattedCell._cellValue).toEqual(Just(CellDouble(9)));
+    expect(v.flagTrue._formattedCell._cellValue).toEqual(Just(CellBool(true)));
+  });
+
+  it("gives an empty, unformatted cell when there is no entity", () => {
+    const r = evalModelEdit(riskClass, identity<RV>(), model, (ctx) =>
+      tabulateCell(riskClass, ctx, [], [], MatrixColumn("N", FieldColumn(def_FieldColumnData))));
+    expect(r).toEqual({ tag: "Right", value: def_FormattedCell });
+  });
+
   it("computes column widths from the headings and field types", () => {
     const w = (name: string, d: Parameters<typeof MatrixColumn>[1]) => {
       const cp = matrixColumn(riskClass, model, 3, MatrixColumn(name, d));
@@ -171,6 +254,16 @@ describe("Formats and cells", () => {
     expect(w("Q", QueryColumn(U.nil))).toBe(15);
     expect(w("L", LookupColumn(U.nil))).toBe(10);
     expect(w("x".repeat(80), LookupColumn(U.nil))).toBe(30);
+    // Stamp fields are not looked up (only built-in and model fields).
+    expect(w("S", FieldColumn(FieldColumnData(fid("Created"), Nothing)))).toBe(4);
+  });
+
+  it("computes column widths for the other field types", () => {
+    const w = (f: string) => {
+      const cp = matrixColumn(riskClass, decoModel, 1, MatrixColumn("", FieldColumn(FieldColumnData(fid(f), Nothing))));
+      return cp.cpWidth.tag === "Just" ? cp.cpWidth.value : NaN;
+    };
+    expect(["Done", "Weight", "Notes", "Flag", "Score", "Ratio"].map(w)).toEqual([4, 6, 30, 4, 4, 6]);
   });
 });
 
@@ -325,14 +418,21 @@ describe("The Risk Register matrix of the example model, exported to Excel", () 
   });
 
   it("writes hyperlinks as formulas", () => {
+    let links = 0;
     risks.forEach((risk, i) => {
       const cell = sheet.cells[ref(3 + i, 17)];
       const url = risk.extensions["Previous Version"]?.value;
       if (url) {
+        links++;
         expect(cell.value).toBe(`=HYPERLINK("${url}","${url}")`);
         expect(cell.type).toBe("f");
+        expect(cell.wrap).toBe(true);
+        expect(cell.border.bottom.style).toBe("thin");
+      } else {
+        expect(cell.value).toBeNull();
       }
     });
+    expect(links).toBeGreaterThan(0);
   });
 
   it("sets the column widths and row heights", () => {

@@ -14,6 +14,7 @@ import type { DrawingArea } from "./Widgets";
 import { Context } from "../Cairo";
 import { eventKeyFromDom, modifiersOf, onImagesLoaded, type EventButton, type EventScroll } from "../Gdk";
 import { handleAccelerator } from "./RenderRoot";
+import { currentTreeDrag } from "./RenderTree";
 
 /** The nearest ancestor that scrolls, if any. */
 function scrollingAncestor(el: HTMLElement): HTMLElement | null {
@@ -159,6 +160,32 @@ export function DrawingAreaView({ w, layout }: { w: DrawingArea; layout?: Layout
     return () => c.removeEventListener("wheel", onWheel);
   }, [w]);
 
+  // Drop target (`widgetDragDestSet`): tree view drags emit GTK's "drag-motion" and "drag-drop"
+  // (then "drag-data-received" if the drop handler did not return true) in widget coordinates.
+  const isDragDest = (): boolean => (w as unknown as { dragDest?: boolean }).dragDest === true;
+  const dropXY = (e: React.DragEvent): [number, number] => {
+    const r = outerRef.current!.getBoundingClientRect();
+    return [e.clientX - r.left, e.clientY - r.top];
+  };
+  const onDragOver = (e: React.DragEvent) => {
+    const drag = currentTreeDrag();
+    if (!isDragDest() || drag === null || !w.sensitive) return;
+    e.preventDefault();
+    const [x, y] = dropXY(e);
+    drag.ctx.event = e.nativeEvent;
+    drag.ctx.status = undefined;
+    w.emit("drag-motion", drag.ctx, x, y, e.timeStamp);
+  };
+  const onDrop = (e: React.DragEvent) => {
+    const drag = currentTreeDrag();
+    if (!isDragDest() || drag === null || !w.sensitive) return;
+    e.preventDefault();
+    const [x, y] = dropXY(e);
+    drag.ctx.event = e.nativeEvent;
+    const handled = w.emit("drag-drop", drag.ctx, x, y, e.timeStamp);
+    if (handled !== true) w.emit("drag-data-received", drag.ctx, x, y, drag.paths, 0, e.timeStamp);
+  };
+
   const props = baseProps(w, "", { display: "block", ...layout });
   return (
     <div
@@ -167,6 +194,8 @@ export function DrawingAreaView({ w, layout }: { w: DrawingArea; layout?: Layout
         outerRef.current = e;
         props.ref(e);
       }}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
     >
       <canvas
         ref={canvasRef}

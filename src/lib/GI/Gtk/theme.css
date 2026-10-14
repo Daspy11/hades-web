@@ -597,6 +597,10 @@ button, input, textarea, select { font: inherit; color: inherit; }
   transition: transform 0.1s;
 }
 .gtk-expander.expanded::before { transform: rotate(90deg); }
+/* enable-tree-lines: Adwaita draws them in the tree view's border-left-color,
+   mix($fg_color, $base_color, 50%) (mix($selected_fg_color, $selected_bg_color, 50%) when selected). */
+.gtk-tree-lines { position: absolute; left: 0; top: 0; height: 100%; overflow: visible; pointer-events: none; color: #96999a; }
+.gtk-treeview-cell.selected .gtk-tree-lines { color: #9ac1f1; }
 
 /* Icon view */
 .gtk-iconView { display: flex; flex-wrap: wrap; align-content: flex-start; gap: 6px; padding: 6px; background: var(--theme-base); outline: none; }

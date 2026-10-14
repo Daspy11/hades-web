@@ -531,7 +531,7 @@ function prop_treeOp(
  * counterexample.)
  */
 function runTests(): [boolean, string] {
-  const gen = newGenOrFail("3aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+  const gen = newGenOrFail("3aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
   Gtk.init(null);
   const window = Gtk.windowNew(Gtk.WindowTypeToplevel);
   const maxSuccess = 1000;

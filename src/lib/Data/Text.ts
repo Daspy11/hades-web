@@ -271,6 +271,42 @@ export function tails(t: Text): Text[] {
 }
 
 /** Haskell `show` for a Text value: a double-quoted, escaped string literal. */
+/**
+ * Haskell `show` for `Text` (and `String`): double-quoted, with GHC's escapes. Printable ASCII is
+ * kept, `"` and `\\` are backslash-escaped, control characters use their mnemonics (`\n`,
+ * `\t`, `\ESC`, ...), and characters from DEL upwards are written as decimal code points
+ * (`é` → `\233`), followed by `\&` when the next character is a digit. `\SO` is followed by `\&`
+ * when the next character is `H`, so that it is not read back as `\SOH`.
+ */
 export function showText(t: Text): string {
-  return JSON.stringify(t);
+  return '"' + showLitString(Array.from(t)) + '"';
+}
+
+const asciiTab = [
+  "NUL", "SOH", "STX", "ETX", "EOT", "ENQ", "ACK", "BEL", "BS", "HT", "LF", "VT", "FF", "CR", "SO", "SI",
+  "DLE", "DC1", "DC2", "DC3", "DC4", "NAK", "SYN", "ETB", "CAN", "EM", "SUB", "ESC", "FS", "GS", "RS", "US",
+];
+
+function showLitString(cs: readonly string[]): string {
+  let out = "";
+  for (let i = 0; i < cs.length; i++) {
+    const c = cs[i];
+    const next = cs[i + 1];
+    const code = c.codePointAt(0)!;
+    if (c === '"') out += '\\"';
+    else if (c === "\\") out += "\\\\";
+    else if (code > 127) out += "\\" + code + (next !== undefined && /[0-9]/.test(next) ? "\\&" : "");
+    else if (code === 127) out += "\\DEL";
+    else if (code >= 32) out += c;
+    else if (code === 7) out += "\\a";
+    else if (code === 8) out += "\\b";
+    else if (code === 12) out += "\\f";
+    else if (code === 10) out += "\\n";
+    else if (code === 13) out += "\\r";
+    else if (code === 9) out += "\\t";
+    else if (code === 11) out += "\\v";
+    else if (code === 14) out += "\\SO" + (next === "H" ? "\\&" : "");
+    else out += "\\" + asciiTab[code];
+  }
+  return out;
 }

@@ -1184,8 +1184,12 @@ export class Notebook extends Container {
     if (n < 0 || n >= this.pages.length) return;
     if (n === this.currentPage) return;
     const page = this.pages[n].child;
+    const old = this.pages[this.currentPage]?.child ?? null;
     this.emit("switch-page", page, n);
     this.currentPage = n;
+    // As GTK: the hidden page is unmapped and the shown page mapped ("unmap"/"map" signals).
+    if (old !== null && old !== page) old.setPageMapped(false);
+    page.setPageMapped(true);
     this.changed();
   }
   override setProperty(name: string, value: unknown): void {

@@ -20,6 +20,8 @@ export * from "./Choosers";
 export * from "./IconTheme";
 export * from "./Builder";
 export { main, init, mainQuit, GtkRoot } from "./RenderRoot";
+/** `Gtk.showUriOnWindow` (gi-gtk has it in `GI.Gtk`): opens the URI in a new browser tab. */
+export { showUriOnWindow } from "../Gio";
 
 /** A cell layout: a tree view column or a combo box. */
 export type CellLayout = TreeViewColumn | ComboBox;

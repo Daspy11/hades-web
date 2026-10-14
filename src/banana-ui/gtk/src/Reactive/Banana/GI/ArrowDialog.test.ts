@@ -7,13 +7,15 @@ import { Just, Nothing, type Maybe } from "@/lib/Data/Maybe";
 import { lens, type Lens } from "@/lib/Control/Lens";
 import { readInt, showInt } from "@/lib/Prelude";
 import { GadgetData, makeChanges, pure_Changes, type Changes } from "@/banana-ui/base/Reactive/Banana/Common";
+import * as Gdk from "@/lib/GI/Gdk";
 import {
-  ClickableItem, ComboItem, Dialog, OkApplyButton, OkButton, PrismaticGadget, accum, arr, boundedCombo, buttonBar, buttonIO,
-  colourBox, comboBox, cond, enabled, exec, focusing, form, frame, gFanout, gId, gLoop, gPipe, gSecond, icon, initially,
-  linked, memoBox, message, optional, readOnlyText, simpleTextBox, styled, tabForm, tickBox, treeSelector, typedTextBox,
-  unionTab, validate, validateText, type Gadget,
+  ClickableItem, ComboItem, Dialog, OkApplyButton, OkButton, PrismaticGadget, accum, arr, boundedCombo, box, buttonBar, buttonIO,
+  colourBox, comboBox, cond, enabled, exec, focusing, form, frame, gFanout, gId, gLoop, gPipe, gSecond, getEnv, grid, icon,
+  initially, intercept, linked, memoBox, message, optional, prismatic, prismaticOver, readOnlyText, scrolled, send, sendMap,
+  simpleRadio, simpleTextBox, styled, tabForm, tickBox, traversing, traversingOver, treeSelector, typedTextBox, unionTab,
+  validate, validateText, withEnv, type Gadget,
 } from "@/banana-ui/base/Reactive/Banana/ArrowDialog";
-import { constantDialog } from "@/banana-ui/base/Reactive/Banana/GadgetPrimitives";
+import { CloseButton, constantDialog, type Dialog_ } from "@/banana-ui/base/Reactive/Banana/GadgetPrimitives";
 import * as S from "@/lib/Data/Set";
 import { Left, Right, type Either } from "@/lib/Data/Either";
 import { Node } from "@/lib/Data/Tree";
@@ -568,3 +570,211 @@ describe("popups", () => {
 });
 
 type Size = "Small" | "Large";
+
+/** Render with an input event that the test fires, and the input behavior stepped from it. */
+function renderE<I, O>(g: Gadget<null, any, I, O>, initial: I): [GadgetOut<any, O>, GadgetData<O>[], (v: GadgetData<I>) => void] {
+  const [e, fire] = B.liftMomentIO(() => B.newEvent<GadgetData<I>>());
+  const [out, seen] = B.liftMomentIO(() => {
+    const o = renderGadget(theme, noInit, null, GadgetData(true, initial), pure_Changes(null), e, B.stepper(GadgetData(true, initial), e), g);
+    return [o, collect(o.gadgetUser)] as const;
+  });
+  return [out, seen, fire];
+}
+
+const buttonPress = (type: Gdk.EventType, button = 1): Gdk.EventButton =>
+  ({ type, button, x: 0, y: 0, xRoot: 0, yRoot: 0, state: [], time: 0 });
+
+describe("environment and side channel", () => {
+  test("withEnv sets the environment from a gadget output, and getEnv reads it", () => {
+    const g = withEnv(arr<null, never, string, number>((t: string) => t.length), getEnv<number, never, string>());
+    const [out, seen, fire] = renderE(g, "abc");
+    expect(out.gadgetInitial).toEqual(GadgetData(true, 3));
+    // Environment changes are nothing to do with the user.
+    fire(GadgetData(true, "hello"));
+    expect(seen).toEqual([]);
+    expect(B.liftMomentIO(() => B.valueB(out.gadgetValue))).toEqual(GadgetData(true, 5));
+    // Invalid environment updates are filtered out (cleanOutput).
+    fire(GadgetData(false, "no"));
+    expect(B.liftMomentIO(() => B.valueB(out.gadgetValue))).toEqual(GadgetData(true, 5));
+  });
+
+  test("send puts valid user values on the side channel and sendMap filters them", () => {
+    const g = sendMap(
+      (w: number) => (w > 0 ? Just(w * 10) : Nothing),
+      gPipe(typedTextBox<null, number, number>(showInt, readInt), send<null, number, number>((n: number) => Just(n))),
+    );
+    const [out, seen] = render(g as Gadget<null, never, number, number>, 1);
+    const sent = B.liftMomentIO(() => collect(out.gadgetEvents as unknown as B.Event<readonly number[]>));
+    const [entry] = find(Gtk.Entry, out.gadgetView);
+    Gtk.entrySetText(entry, "3");
+    Gtk.entrySetText(entry, "-2"); // Sent as [-2], mapped to [], so nothing is sent.
+    Gtk.entrySetText(entry, "4");
+    expect(sent).toEqual([[30], [40]]);
+    expect(seen.map((x) => x._gdValue)).toEqual([3, -2, 4]);
+  });
+});
+
+describe("optics", () => {
+  type Item = Either<number, string>;
+  const numBox = (): Gadget<null, never, number, number> => typedTextBox<null, never, number>(showInt, readInt);
+  const idL = <A>(): Lens<A, A> => lens((a: A) => a, (_a: A, v: A) => v);
+
+  test("prismatic edits a variant, using the default for other variants", () => {
+    const [out, seen] = render(prismatic(0, _Left<number, string>(), numBox()), Right("x") as Item);
+    const [entry] = find(Gtk.Entry, out.gadgetView);
+    expect(Gtk.entryGetText(entry)).toBe("0");
+    expect(out.gadgetInitial._gdValue).toEqual(Left(0));
+    Gtk.entrySetText(entry, "5");
+    expect(seen).toEqual([GadgetData(true, Left(5))]);
+  });
+
+  test("prismaticOver always rebuilds the variant from the prism", () => {
+    const [out, seen] = renderFb(accum(prismaticOver(0, _Left<number, string>(), focusing(idL<number>(), numBox()))), Right("x") as Item);
+    const [entry] = find(Gtk.Entry, out.gadgetView);
+    Gtk.entrySetText(entry, "7");
+    expect(seen[0]._gdValue).toEqual(Left(7));
+  });
+
+  test("traversing sets the target and leaves non-matching values alone", () => {
+    const [out1, seen1] = renderFb(accum(traversing(0, _Left<number, string>(), numBox())), Left(1) as Item);
+    Gtk.entrySetText(find(Gtk.Entry, out1.gadgetView)[0], "7");
+    expect(seen1[0]._gdValue).toEqual(Left(7));
+    const [out2, seen2] = renderFb(accum(traversing(0, _Left<number, string>(), numBox())), Right("a") as Item);
+    const [entry2] = find(Gtk.Entry, out2.gadgetView);
+    expect(Gtk.entryGetText(entry2)).toBe("0");
+    Gtk.entrySetText(entry2, "7");
+    expect(seen2[0]._gdValue).toEqual(Right("a"));
+  });
+
+  test("traversingOver applies the inner function through the traversal", () => {
+    const g = accum(traversingOver(0, _Left<number, string>(), focusing(idL<number>(), numBox())));
+    const [out1, seen1] = renderFb(g, Left(1) as Item);
+    Gtk.entrySetText(find(Gtk.Entry, out1.gadgetView)[0], "8");
+    expect(seen1[0]._gdValue).toEqual(Left(8));
+    const [out2, seen2] = renderFb(g, Right("b") as Item);
+    Gtk.entrySetText(find(Gtk.Entry, out2.gadgetView)[0], "8");
+    expect(seen2[0]._gdValue).toEqual(Right("b"));
+  });
+});
+
+describe("layout gadgets", () => {
+  const nameG = focusing(nameL, simpleTextBox<null, never>());
+  const ageG = focusing(ageL, typedTextBox<null, never, number>(showInt, readInt));
+
+  test("a box separates its groups and merges their outputs", () => {
+    const shown = focusing(lens((p: Person) => p.name, (p: Person, _n: string) => p), readOnlyText<null, never, string>((_e, n) => n));
+    const [out, seen] = renderFb(accum(box<null, never, Person>("Vertical", [[nameG, shown], [], [ageG]])), { name: "A", age: 1 });
+    const [bx] = out.gadgetView as Gtk.Box[];
+    expect(bx).toBeInstanceOf(Gtk.Box);
+    // The empty group is dropped, so there is one separator.
+    expect(bx.getChildren().map((c) => c.constructor.name)).toEqual(["Entry", "Entry", "Separator", "Entry"]);
+    const [n1, s1, a1] = find(Gtk.Entry, out.gadgetView);
+    Gtk.entrySetText(a1, "9");
+    expect(seen[0]._gdValue).toEqual({ name: "A", age: 9 });
+    n1.userSetText("B");
+    expect(seen[1]._gdValue).toEqual({ name: "B", age: 9 });
+    expect(Gtk.entryGetText(s1)).toBe("B");
+  });
+
+  test("two editors of the same field in a box: the later one writes its old value back (as in Haskell)", () => {
+    const [out, seen] = renderFb(accum(box<null, never, Person>("Vertical", [[nameG], [nameG]])), { name: "A", age: 1 });
+    const [n1] = find(Gtk.Entry, out.gadgetView);
+    n1.userSetText("B");
+    expect(seen[0]._gdValue).toEqual({ name: "A", age: 1 });
+  });
+
+  test("a grid puts the headers in the first row and column", () => {
+    const [out, seen] = renderFb(accum(grid<null, never, Person>(["C1", "C2"], ["R1"], [[nameG, ageG]])), { name: "A", age: 1 });
+    const [gr] = out.gadgetView as Gtk.Grid[];
+    const at = (l: number, t: number): Gtk.Widget | null => Gtk.gridGetChildAt(gr, l, t);
+    expect(Gtk.labelGetText(at(1, 0) as Gtk.Label)).toBe("C1");
+    expect(Gtk.labelGetText(at(2, 0) as Gtk.Label)).toBe("C2");
+    expect(Gtk.labelGetText(at(0, 1) as Gtk.Label)).toBe("R1");
+    expect(at(1, 1)).toBeInstanceOf(Gtk.Entry);
+    expect(at(2, 1)).toBeInstanceOf(Gtk.Entry);
+    Gtk.entrySetText(at(2, 1) as Gtk.Entry, "4");
+    expect(seen[0]._gdValue).toEqual({ name: "A", age: 4 });
+  });
+
+  test("scrolled wraps the widgets in a scrolled window", () => {
+    const [out] = render(scrolled(form<null, never, Person>("Vertical", [["Name", nameG]])), { name: "A", age: 1 });
+    const [sw] = out.gadgetView;
+    expect(sw).toBeInstanceOf(Gtk.ScrolledWindow);
+    expect(Gtk.binGetChild(sw as Gtk.ScrolledWindow)).toBeInstanceOf(Gtk.Grid);
+  });
+
+  test("radio buttons show and report the selected value", () => {
+    const [out, seen, fire] = renderE(simpleRadio<null, never, string>(["A", "B", "C"]), "B");
+    const btns = find(Gtk.RadioButton, out.gadgetView);
+    expect(btns.map(Gtk.toggleButtonGetActive)).toEqual([false, true, false]);
+    btns[2].click();
+    expect(seen).toEqual([GadgetData(true, "C")]);
+    fire(GadgetData(true, "A"));
+    expect(btns.map(Gtk.toggleButtonGetActive)).toEqual([true, false, false]);
+  });
+
+  test("exec flags the inner output invalid when its input is invalid", () => {
+    const g = exec<null, never, boolean, string, string>(() => simpleTextBox<null, never>());
+    const [out, seen, fire] = renderE(g, [false, "abc"] as [boolean, string]);
+    fire(GadgetData(false, [true, "abc"]));
+    // A new inner gadget reports its initial value, qualified by the validity of the input.
+    expect(seen).toEqual([GadgetData(false, "abc")]);
+    expect(out.gadgetInitial).toEqual(GadgetData(true, "abc"));
+  });
+});
+
+describe("intercept and dialog buttons", () => {
+  const partDialog = Dialog<null, never, Person, Person>("Person", OkButton, personGadget());
+
+  test("intercept pops up a dialog on a double click and feeds its result in", () => {
+    const g = intercept<null, never, Person>(true, constantDialog(partDialog), readOnlyText((_e: null, p: Person) => p.name));
+    const [out] = renderFb(g, { name: "Ann", age: 30 });
+    const [entry] = find(Gtk.Entry, out.gadgetView);
+    const before = new Set(Gtk.toplevels.list());
+    // A single click is passed on; it does not open the dialog.
+    expect(entry.emit("button-press-event", buttonPress(Gdk.EventTypeButtonPress))).toBe(false);
+    expect(Gtk.toplevels.list().filter((w) => !before.has(w))).toEqual([]);
+    expect(entry.emit("button-press-event", buttonPress(Gdk.EventType2buttonPress))).toBe(true);
+    const d = Gtk.toplevels.list().find((w) => !before.has(w) && w instanceof Gtk.Dialog) as Gtk.Dialog;
+    expect(d.title).toBe("Person");
+    find(Gtk.Entry, [d.contentArea])[0].userSetText("Zed");
+    Gtk.dialogResponse(d, Gtk.ResponseTypeOk);
+    expect(Gtk.entryGetText(entry)).toBe("Zed");
+  });
+
+  test("a close button dialog returns the value when closed", () => {
+    const dialog = Dialog<null, never, Person, Person>("Info", CloseButton("_Done"), personGadget());
+    const [result, d] = B.liftMomentIO(() => {
+      const before = new Set(Gtk.toplevels.list());
+      const r = collect(createDialog(Gtk.labelNew("parent"), theme, pure_Changes(null), [0, { name: "Ann", age: 30 }, dialog]));
+      return [r, Gtk.toplevels.list().find((w) => !before.has(w) && w instanceof Gtk.Dialog) as Gtk.Dialog] as const;
+    });
+    expect(d.actionArea.children.map((b) => (b as Gtk.Button).label)).toEqual(["_Done"]);
+    find(Gtk.Entry, [d.contentArea])[0].userSetText("Bo");
+    Gtk.dialogResponse(d, Gtk.ResponseTypeClose);
+    expect(result).toEqual([[0, Just({ name: "Bo", age: 30 })]]);
+    expect(d.destroyed).toBe(true);
+  });
+
+  test("mkDialogWidget clears the frame when the selector has no dialog for the value", () => {
+    const sel = (_e: null, p: Person): Maybe<Dialog_<null, never, Person>> => (p.name === "" ? Nothing : Just(partDialog));
+    const [frameW, edits, inputs] = B.liftMomentIO(() => {
+      const [inputE, fire] = B.newEvent<readonly [string, B.Behavior<Person>]>();
+      const [w, out] = mkDialogWidget(
+        theme, noInit, null, pure_Changes(null), B.pureB(sel), ["a", B.pureB({ name: "", age: 1 })], inputE,
+      );
+      return [w, collect(out), fire] as const;
+    });
+    const frm = find(Gtk.Frame, [frameW])[0];
+    expect(Gtk.frameGetLabel(frm)).toBe(null);
+    expect(Gtk.binGetChild(frm)).toBe(null);
+    inputs(["b", B.pureB({ name: "Bea", age: 2 })]);
+    expect(Gtk.frameGetLabel(frm)).toBe("Person");
+    const [nameEntry] = find(Gtk.Entry, [frameW]);
+    nameEntry.userSetText("Ben");
+    expect(edits).toEqual([["b", { name: "Ben", age: 2 }]]);
+    inputs(["c", B.pureB({ name: "", age: 3 })]);
+    expect(Gtk.binGetChild(frm)).toBe(null);
+    expect(nameEntry.destroyed).toBe(true);
+  });
+});

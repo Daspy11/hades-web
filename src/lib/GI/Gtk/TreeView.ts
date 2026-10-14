@@ -536,11 +536,13 @@ export function treeViewCollapseAll(v: TreeView): void {
 }
 export function treeViewExpandRow(v: TreeView, p: TreePath, openAll: boolean): boolean {
   const n = v.model?.nodeAt(p);
-  if (!n) return false;
+  // As in GTK, a row without children cannot be expanded (so it is shown collapsed if it gets
+  // children later).
+  if (!n || n.children.length === 0) return false;
   v.expanded.add(v.keyOf(n));
   if (openAll) {
     const go = (ns: RowNode[]) => ns.forEach((c) => {
-      v.expanded.add(v.keyOf(c));
+      if (c.children.length > 0) v.expanded.add(v.keyOf(c));
       go(c.children);
     });
     go(n.children);
@@ -562,7 +564,7 @@ export function treeViewExpandToPath(v: TreeView, p: TreePath): void {
   if (!m) return;
   for (let i = 1; i <= p.indices.length; i++) {
     const n = m.nodeAt(new TreePath(p.indices.slice(0, i)));
-    if (n) v.expanded.add(v.keyOf(n));
+    if (n && n.children.length > 0) v.expanded.add(v.keyOf(n)); // gtk_tree_view_expand_row
   }
   v.changed();
 }

@@ -6,8 +6,10 @@ import {
   getDataDir,
   getDataFileName,
   isDataFile,
+  listDataDirectory,
   listDataFiles,
 } from "./Paths";
+import { IOError } from "./IO";
 
 describe("System.Paths", () => {
   test("data directories", () => {
@@ -51,6 +53,22 @@ describe("System.Paths", () => {
     expect(listDataFiles("hades", "hicolor/48x48/actions").length).toBeGreaterThan(0);
     expect(listDataFiles("hades", "hicol")).toEqual([]);
     expect(listDataFiles("webits", "").every((p) => !p.endsWith(".ts"))).toBe(true);
+  });
+
+  test("listDataDirectory lists the entries directly inside a data directory", () => {
+    expect(listDataDirectory(getDataDir("dsm") + "/examples").sort()).toEqual([
+      "1 Quick Guide to the DSM.dsm",
+      "2 FMEA.dsm",
+      "3 Managing Risks.dsm",
+      "4 Managing Hazards.dsm",
+    ]);
+    expect(listDataDirectory("/src/dsm/share/examples/")).toHaveLength(4);
+    const share = listDataDirectory(getDataDir("dsm"));
+    expect(share).toContain("documentation");
+    expect(share).toContain("examples");
+    expect(listDataDirectory("/src/hades/share/docx")).toContain("_rels");
+    expect(() => listDataDirectory("/src/dsm/share/exam")).toThrow(IOError);
+    expect(() => listDataDirectory("/nowhere")).toThrow(IOError);
   });
 
   test("fetching a missing file rejects", async () => {

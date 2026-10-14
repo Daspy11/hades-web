@@ -1,5 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { TreeViewView } from "@/lib/GI/Gtk/RenderTree";
 import * as Gtk from "@/lib/GI/Gtk";
 import * as Gdk from "@/lib/GI/Gdk";
 import * as B from "@/lib/Reactive/Banana";
@@ -330,8 +333,9 @@ describe("modelWidget", () => {
     h.select([ids.deep, ids.a]);
     expect(h.selections.length).toBe(n);
     expect(getSelectedRows(h.vw.selection)).toEqual(S.fromList([[0, 0], [0, 1, 0, 0]]));
-    // The ancestors of a selected entity are expanded.
+    // The ancestors of a selected entity are expanded; as in GTK, a leaf row cannot be.
     expect(Gtk.treeViewRowExpanded(h.vw, Gtk.treePathNewFromIndices([0, 1, 0]))).toBe(true);
+    expect(Gtk.treeViewRowExpanded(h.vw, Gtk.treePathNewFromIndices([0, 1, 0, 0]))).toBe(false);
     h.select([ids.a]);
     expect(getSelectedRows(h.vw.selection)).toEqual(S.fromList([[0, 0]]));
   });
@@ -456,6 +460,30 @@ describe("modelWidget", () => {
     expect(Gtk.treeViewRowExpanded(h.vw, Gtk.treePathNewFromIndices([0, 0, 0]))).toBe(true);
     expect(getSelectedRows(h.vw.selection)).toEqual(S.fromList([[0, 0, 0, 0]]));
     expect(shownErrors).toEqual([]);
+  });
+});
+
+describe("the tree view's tree lines (treeViewSetEnableTreeLines)", () => {
+  it("are drawn as GTK draws them: elbows to the parent's expander, ancestors' lines while they have more children", () => {
+    const [model, ids] = sampleModel();
+    const h = harness(model);
+    expect(h.vw.enableTreeLines).toBe(true);
+    h.select([ids.deep]); // Expands "Pkg 9" and "Inner".
+    Gtk.treeViewExpandRow(h.vw, Gtk.treePathNewFromIndices([0, 2]), false);
+    const doc = new DOMParser().parseFromString(renderToStaticMarkup(createElement(TreeViewView, { w: h.vw })), "text/html");
+    const linesOf = (path: string): string[] =>
+      [...doc.querySelectorAll(`.gtk-treeview-cell[data-path="${path}"] .gtk-tree-lines line`)].map((l) =>
+        ["x1", "y1", "x2", "y2"].map((a) => l.getAttribute(a)).join(" "));
+    // Rows: Test; a, Pkg 9 (Inner (deep)), Pkg 10 (Fixed, x). Expander centres at 12 + 18 * depth.
+    expect(linesOf("0")).toEqual([]);
+    expect(linesOf("0:0")).toEqual(["12.5 0 12.5 100%", "12.5 50% 30 50%"]); // a leaf
+    expect(linesOf("0:1")).toEqual(["12.5 0 12.5 100%", "12.5 50% 20 50%"]); // stops before its expander
+    expect(linesOf("0:1:0")).toEqual(["30.5 0 30.5 50%", "30.5 50% 38 50%", "12.5 0 12.5 100%"]);
+    expect(linesOf("0:1:0:0")).toEqual(["48.5 0 48.5 50%", "48.5 50% 66 50%", "12.5 0 12.5 100%"]);
+    expect(linesOf("0:2")).toEqual(["12.5 0 12.5 50%", "12.5 50% 20 50%"]); // last child of the root
+    expect(linesOf("0:2:1")).toEqual(["30.5 0 30.5 50%", "30.5 50% 48 50%"]);
+    // Only the first (expander) column has them.
+    expect(doc.querySelectorAll(".gtk-tree-lines").length).toBe(7);
   });
 });
 

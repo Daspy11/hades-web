@@ -461,7 +461,10 @@ export function main(): void {
       return;
     }
     const [res, newState] = r.value;
-    st = newState;
+    // As Model.GI.PackageTree.processModelUpdates: only an update with a checkpoint message
+    // changes the model. The model edits of the other actions (e.g. the intermediate steps of a
+    // drag) are discarded; the diagram editor keeps its own state.
+    if (res.hadesActionCheckpoint.tag === "Just") st = newState;
     const h1 = res.hadesActionNewState;
     current = h1;
     fireResult(h1);

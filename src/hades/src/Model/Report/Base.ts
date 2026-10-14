@@ -36,6 +36,11 @@
  *   exported by the Haskell module): `ResultFragment(...)`, `append_ResultFragment`,
  *   `mempty_ResultFragment`, `mconcat_ResultFragment`, `finaliseResult`, `textToBlocks`,
  *   `prefixBlock`, `inColour`, `inlineIcon`, `fieldFragment(ctx, fid, v)`.
+ * * Kept as in Haskell: joining fragments puts a `Space` before following inlines and before
+ *   the first paragraph of a following fragment (`prefixBlock` with empty inlines), and an empty
+ *   `Para []` before a following non-paragraph block (e.g. between two headings; HTML drops it,
+ *   Word shows an empty paragraph); a decorated Boolean that is true is highlighted with the
+ *   colour for false.
  */
 import * as M from "@/lib/Data/Map";
 import * as S from "@/lib/Data/Set";
@@ -747,6 +752,7 @@ export function fieldFragment<V>(ctx: ModelEditCtx<V, V>, fname: FieldId, v: Ext
         boolIcons.tag === "Just"
           ? inlineIcon(b ? boolIcons.value[1] : boolIcons.value[0])
           : mempty_ResultFragment,
+        // As in Haskell (`if b then cFalse else cTrue`), a true value gets the colour for false.
         boolColours.tag === "Just"
           ? inColour(b ? boolColours.value[0] : boolColours.value[1], displayText)
           : displayText,

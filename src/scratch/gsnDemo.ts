@@ -329,27 +329,28 @@ function buildNotation(): ModelId {
     const edge = (t: "ContextArrow" | "SupportArrow", nm: string, card: Cardinality): TV =>
       review(_GsnItem, GsnEdgeItem<TV>(GsnEdge(t, Name(nm), card)));
     const arrowRels = [NR.edgeFromRelation, NR.edgeToRelation] as const;
-    addNode("G1", Goal(Name("G1"), "Goal: developed and instantiated.", true, true), 40, 20);
-    addNode("G2", Goal(Name("G2"), "Undeveloped goal.", false, true), 300, 20);
-    addNode("G3", Goal(Name("G3"), "Uninstantiated goal.", true, false), 560, 20);
-    addNode("G4", Goal(Name("G4"), "Undeveloped and uninstantiated goal.", false, false), 820, 20);
-    addNode("S1", Strategy(Name("S1"), "Strategy: argue over each hazard.", true, true), 40, 190);
-    addNode("C1", Context(Name("C1"), "Context: the operating environment.", true), 300, 190);
+    // The argument on the left; the undeveloped/uninstantiated decorations on the right.
+    addNode("G1", Goal(Name("G1"), "Goal: developed and instantiated.", true, true), 300, 20);
+    addNode("C1", Context(Name("C1"), "Context: the operating environment.", true), 30, 25, 210, 70);
+    addNode("S1", Strategy(Name("S1"), "Strategy: argue over each hazard.", true, true), 300, 190);
     addNode("A1", Assumption(Name("A1"), "Assumption: the hazard list is complete.", true), 560, 180, 200, 100);
-    addNode("J1", Justification(Name("J1"), "Justification: accepted practice.", true), 820, 180, 200, 100);
     addNode("Sn1", Solution(Name("Sn1"), "Solution: test results.", true), 40, 380, 180, 100);
     addNode("Opt1", GsnOption(Name("Opt1"), "Option", true), 300, 370, 160, 120);
     addNode("G5", Goal(Name("G5"), "Zero or more (0:n).", true, true), 560, 390);
-    addNode("G6", Goal(Name("G6"), "One or more (1:n).", true, true), 560, 580);
+    addNode("G6", Goal(Name("G6"), "One or more (1:n).", true, true), 280, 580);
     addBox("E1", EvidenceBox, review(_Ev, Evidence(Name("Test report"))), 30, 580);
-    addArrow("G1", "S1", edge("SupportArrow", "Support1", "CardinalityOne"), GsnArrow("SupportArrow"), arrowRels);
+    addNode("G2", Goal(Name("G2"), "Undeveloped goal.", false, true), 840, 20);
+    addNode("G3", Goal(Name("G3"), "Uninstantiated goal.", true, false), 1100, 20);
+    addNode("G4", Goal(Name("G4"), "Undeveloped and uninstantiated goal.", false, false), 840, 190);
+    addNode("J1", Justification(Name("J1"), "Justification: accepted practice.", true), 1100, 180, 200, 100);
     addArrow("G1", "C1", edge("ContextArrow", "Context1", "CardinalityOne"), GsnArrow("ContextArrow"), arrowRels);
+    addArrow("G1", "S1", edge("SupportArrow", "Support1", "CardinalityOne"), GsnArrow("SupportArrow"), arrowRels);
     addArrow("S1", "A1", edge("ContextArrow", "Context2", "CardinalityOne"), GsnArrow("ContextArrow"), arrowRels);
-    addArrow("G4", "J1", edge("ContextArrow", "Context3", "CardinalityOne"), GsnArrow("ContextArrow"), arrowRels);
     addArrow("S1", "Sn1", edge("SupportArrow", "Support2", "CardinalityOne"), GsnArrow("SupportArrow"), arrowRels);
     addArrow("S1", "Opt1", edge("SupportArrow", "Support3", "CardinalityOpt"), GsnArrow("SupportArrow"), arrowRels);
     addArrow("S1", "G5", edge("SupportArrow", "Support4", "CardinalityMany"), GsnArrow("SupportArrow"), arrowRels);
-    addArrow("S1", "G6", edge("SupportArrow", "Support5", "CardinalityMany1"), GsnArrow("SupportArrow"), arrowRels);
+    addArrow("Opt1", "G6", edge("SupportArrow", "Support5", "CardinalityMany1"), GsnArrow("SupportArrow"), arrowRels);
+    addArrow("G4", "J1", edge("ContextArrow", "Context3", "CardinalityOne"), GsnArrow("ContextArrow"), arrowRels);
     addArrow("Sn1", "E1", review(_Tr, Trace(Name("Trace1"))), TraceArrow, [traceTailRelation, traceHeadRelation]);
     goToEntity(c, pkg);
     const diagram = mkEntity(c, review(_GsnItem, GsnDiagramItem<TV>(DiagramEntity(

@@ -123,6 +123,13 @@ export abstract class TreeModel extends GObject {
   abstract nColumns(): number;
   /** The value displayed for a column (GValue stores) — typed stores return their row. */
   abstract columnValue(node: RowNode, col: number): any;
+  /**
+   * The `GTK_TREE_MODEL_LIST_ONLY` flag (`treeModelGetFlags`): set by `ListStore` and `SeqStore`.
+   * A tree view of such a model reserves no expander space, as GTK.
+   */
+  listOnly(): boolean {
+    return false;
+  }
 
   bump(): void {
     this.version++;
@@ -287,7 +294,11 @@ export class TreeStore extends TreeModel {
     }
   }
 }
-export class ListStore extends TreeStore {}
+export class ListStore extends TreeStore {
+  override listOnly(): boolean {
+    return true;
+  }
+}
 
 export function treeStoreNew(types: readonly GType[]): TreeStore {
   return new TreeStore(types);
@@ -351,6 +362,10 @@ export class SeqStore<A> extends TreeModel {
   }
   nColumns(): number {
     return 1;
+  }
+  /** gi-gtk-hs `SeqStore` reports `[TreeModelFlagsListOnly]`. */
+  override listOnly(): boolean {
+    return true;
   }
   /** Columns added with `customStoreSetColumn` (column number → row projection). */
   readonly customColumns = new Map<number, (row: A) => any>();
@@ -620,6 +635,10 @@ export class TreeModelSort extends TreeModel {
   }
   setProperty(name: string, value: unknown): void {
     if (name === "model") this.setModel(value as TreeModel);
+  }
+  /** `GtkTreeModelSort` has the flags of its child model. */
+  override listOnly(): boolean {
+    return this.child?.listOnly() ?? false;
   }
   private relay(sig: string): void {
     this.builtVersion = -1;

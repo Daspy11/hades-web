@@ -109,6 +109,22 @@ function isEventSignal(signal: string): boolean {
   return signal.endsWith("-event") || signal === "drag-motion" || signal === "drag-drop" || signal === "draw";
 }
 
+/**
+ * True if the widget is inside a notebook page that is not the notebook's current page (GTK
+ * keeps such widgets unmapped). Notebooks are recognised by their `kind` and `pages`, to avoid
+ * an import cycle with `Widgets.ts`.
+ */
+function inHiddenNotebookPage(w: Widget): boolean {
+  for (let c: Widget = w, p = w.parent; p !== null; c = p, p = p.parent) {
+    const nb = p as unknown as { kind: string; pages?: readonly { child: Widget }[]; currentPage?: number };
+    if (nb.kind === "notebook" && nb.pages !== undefined) {
+      const i = nb.pages.findIndex((pg) => pg.child === c);
+      if (i >= 0 && i !== nb.currentPage) return true;
+    }
+  }
+  return false;
+}
+
 /** `signalHandlerDisconnect` */
 export function signalHandlerDisconnect(obj: GObject, id: SignalHandlerId): void {
   obj.disconnect(id);
@@ -343,18 +359,49 @@ export class Widget extends GObject {
   /** Remove a child (containers override). */
   removeChild(_w: Widget): void {}
 
-  /** Called by the renderer when the element mounts or unmounts. */
+  /**
+   * Called by the renderer when the element mounts or unmounts. Emits "map" when the widget is
+   * first shown and "unmap" when it is removed. Widgets in a notebook page that is not the
+   * current page stay unmapped, as in GTK (see `setPageMapped`). A ref callback that is called
+   * with `null` and then the element again (React re-rendering) does not unmap the widget.
+   */
   setElement(el: HTMLElement | null): void {
     this.el = el;
     if (el && !this.mapped) {
+      if (inHiddenNotebookPage(this)) return;
       this.mapped = true;
       queueMicrotask(() => {
-        if (!this.destroyed) this.emit("map");
+        if (!this.destroyed && this.mapped) this.emit("map");
       });
     } else if (!el && this.mapped) {
+      queueMicrotask(() => {
+        if (this.el === null && this.mapped) {
+          this.mapped = false;
+          this.emit("unmap");
+        }
+      });
+    }
+  }
+
+  /**
+   * GTK unmaps the widgets of a notebook page when another page is shown, and maps them again
+   * when the page is shown, emitting "unmap" and "map" on each of them. The renderer keeps hidden
+   * pages mounted, so `Notebook` calls this on the page it hides (`false`) and the page it shows
+   * (`true`). Only mounted widgets that are not inside another hidden page are mapped.
+   */
+  setPageMapped(on: boolean): void {
+    if (on) {
+      if (this.el !== null && !this.mapped && !inHiddenNotebookPage(this)) {
+        this.mapped = true;
+        queueMicrotask(() => {
+          if (!this.destroyed && this.mapped) this.emit("map");
+        });
+      }
+    } else if (this.mapped) {
       this.mapped = false;
       this.emit("unmap");
     }
+    for (const c of this.getChildren()) c.setPageMapped(on);
   }
 
   destroy(): void {

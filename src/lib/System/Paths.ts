@@ -22,6 +22,8 @@
  * `src/dsm/share/examples/1 Quick Guide to the DSM.dsm`.
  */
 
+import { IOError } from "./IO";
+
 /** The packages that have data files. */
 export type DataPackage = "hades" | "dsm" | "banana-ui-gtk" | "webits";
 
@@ -148,4 +150,20 @@ export function listDataFiles(pkg: DataPackage, dirPrefix: string): string[] {
     if (rel === "" || r === rel || r.startsWith(rel + "/")) result.push(r);
   }
   return result.sort();
+}
+
+/**
+ * `System.Directory.listDirectory` for a data directory given as a virtual path (as built from
+ * `getDataDir`, e.g. `getDataDir("dsm") + "/examples"`): the names of the files and
+ * subdirectories directly inside it, in no particular order (sort them, as Haskell callers do).
+ * Throws an `IOError` when no bundled data file lies under the path (no such directory).
+ */
+export function listDataDirectory(dir: string): string[] {
+  const base = normalise(dir).replace(/\/$/, "") + "/";
+  const names = new Set<string>();
+  for (const p of allFiles.keys()) {
+    if (p.startsWith(base)) names.add(p.slice(base.length).split("/")[0]);
+  }
+  if (names.size === 0) throw new IOError(`${dir}: listDirectory: does not exist (No such file or directory)`);
+  return [...names];
 }

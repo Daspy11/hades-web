@@ -35,7 +35,9 @@
  *   the same object (the element dictionary built from it must be the one given to `startDelta`).
  *   Class methods returning `Delta` take the `DeltaCtx` first, as in "Hades.Abstract.Delta".
  * * **Instances** of the other classes: `eq_ModelSubtype`, `JSON_ModelSubtype(cls)`,
- *   `Reflective_ModelSubtype(cls)` (aliases `eq_GsnItem`, `JSON_GsnItem`, `Reflective_GsnItem`),
+ *   `Reflective_ModelSubtype(cls)` (aliases `eq_GsnItem`, `JSON_GsnItem`, `Reflective_GsnItem`;
+ *   the last two are cached per `cls` and build their diagram parts on first use, so a model
+ *   dictionary can refer to them while it is being built),
  *   `JSON_BoxType`, `show_BoxType`, `JSON_ArrowType`, `show_ArrowType`, `JSON_GsnNode`,
  *   `show_GsnNode`, `JSON_GsnEdgeType`, `show_GsnEdgeType`, `JSON_GsnEdge`, `show_GsnEdge`. The
  *   derived `Eq` instances of `GsnNode`, `GsnEdge`, `BoxType`, `ArrowType` are the structural
@@ -66,7 +68,7 @@ import { isDigit } from "@/lib/Data/Char";
 import { Just, Nothing, fromMaybe, type Maybe } from "@/lib/Data/Maybe";
 import { Left, Right, fromRight } from "@/lib/Data/Either";
 import { equals } from "@/lib/Data/Ord";
-import { absurd } from "@/lib/Prelude";
+import { absurd, showBool } from "@/lib/Prelude";
 import {
   _Just, lens, preview, prism, review, set, traversal, view,
   type Lens, type Prism, type StateCell, type Traversal,
@@ -111,7 +113,7 @@ import {
 import {
   type ActivationScript, type DiagramEntityTypes, type Editable, type EntityWrapper,
   type HasDiagrams, type ModelScript, type ModelScriptAct, DiagramEntity, DiagramWrapper,
-  JSON_DiagramEntity, Reflective_DiagramEntity, diagramEntityData, diagramEntityMenu,
+  JSON_DiagramEntity, Reflective_DiagramEntity, diagramEntityData, diagramEntityMenu, eq_DiagramEntity,
   diagramEntityName, editEntityProperties, entityMenu, insertEntity, openDiagram, scriptContext,
   viewControlTool,
 } from "@/hades/src/Model/Abstract/DiagramType";
@@ -340,9 +342,13 @@ export function DiagramTypeClass_GsnDiagramType<V>(cls: GsnClass<V>): GsnDiagram
 export function eq_ModelSubtype<V>(x: ModelSubtype<V>, y: ModelSubtype<V>): boolean {
   if (x.tag === "GsnNodeItem" && y.tag === "GsnNodeItem") return equals(x._0, y._0);
   if (x.tag === "GsnEdgeItem" && y.tag === "GsnEdgeItem") return equals(x._0, y._0);
-  if (x.tag === "GsnDiagramItem" && y.tag === "GsnDiagramItem") return equals(x._0, y._0);
+  if (x.tag === "GsnDiagramItem" && y.tag === "GsnDiagramItem") return eq_DiagramEntity(x._0, y._0);
   return false;
 }
+
+/** TypeScript: caches of "JSON_ModelSubtype" and "Reflective_ModelSubtype", per model dictionary. */
+const gsnItemCodecs = new WeakMap<object, J.JSONCodec<ModelSubtype<any>>>();
+const gsnItemReflectives = new WeakMap<object, Reflective<ModelSubtype<any>>>();
 
 /** `instance ToJSON (BoxType (GsnDiagramType v))` and `instance FromJSON (BoxType (GsnDiagramType v))` */
 export const JSON_BoxType: J.JSONCodec<BoxType> = J.codec(
@@ -415,6 +421,8 @@ export const JSON_ArrowType: J.JSONCodec<ArrowType> = J.codec(
  * ```
  */
 export function JSON_ModelSubtype<V>(cls: GsnClass<V>): J.JSONCodec<ModelSubtype<V>> {
+  const cached = gsnItemCodecs.get(cls);
+  if (cached !== undefined) return cached as J.JSONCodec<ModelSubtype<V>>;
   type DE = DiagramEntity<GsnElement<V>, DiagramAppearance<GsnDiagramType<V>, V>>;
   // Built on first use, so that a model dictionary can include this codec while it is being built.
   let diagramJ: J.JSONCodec<DE> | null = null;
@@ -426,7 +434,7 @@ export function JSON_ModelSubtype<V>(cls: GsnClass<V>): J.JSONCodec<ModelSubtype
     }
     return diagramJ;
   };
-  return J.codec(
+  const codec = J.codec<ModelSubtype<V>>(
     (item) => {
       switch (item.tag) {
         case "GsnNodeItem": return JSON_GsnNode.toJSON(item._0);
@@ -441,6 +449,8 @@ export function JSON_ModelSubtype<V>(cls: GsnClass<V>): J.JSONCodec<ModelSubtype
       (v1) => GsnDiagramItem<V>(diagramCodec().parseJSON(v1)),
     )(v),
   );
+  gsnItemCodecs.set(cls, codec);
+  return codec;
 }
 
 /**
@@ -449,6 +459,8 @@ export function JSON_ModelSubtype<V>(cls: GsnClass<V>): J.JSONCodec<ModelSubtype
  * ```
  */
 export function Reflective_ModelSubtype<V>(cls: GsnClass<V>): Reflective<ModelSubtype<V>> {
+  const cached = gsnItemReflectives.get(cls);
+  if (cached !== undefined) return cached as Reflective<ModelSubtype<V>>;
   type Item = ModelSubtype<V>;
   type DE = DiagramEntity<GsnElement<V>, DiagramAppearance<GsnDiagramType<V>, V>>;
   // Built on first use (see "JSON_ModelSubtype").
@@ -462,7 +474,7 @@ export function Reflective_ModelSubtype<V>(cls: GsnClass<V>): Reflective<ModelSu
   };
   const mkEdge = (typ: GsnEdgeType): Item => GsnEdgeItem<V>(GsnEdge(typ, Name(""), "CardinalityOne"));
   let defaults: readonly Item[] | null = null;
-  return {
+  const refl: Reflective<Item> = {
     reflectiveName: (item) => {
       switch (item.tag) {
         case "GsnNodeItem": return gsnNodeVariant<Item>(item._0);
@@ -572,6 +584,8 @@ export function Reflective_ModelSubtype<V>(cls: GsnClass<V>): Reflective<ModelSu
       [supportArrowVariant, [NR.edgeFromRelation, NR.edgeToRelation]],
     ]),
   };
+  gsnItemReflectives.set(cls, refl);
+  return refl;
 }
 
 /** Alias of "eq_ModelSubtype": `GsnItem v` is `ModelSubtype (GsnDiagramType v)`. */
@@ -681,11 +695,6 @@ export function Justification(_gsnNodeName: Name, _gsnNodeText: string, _gsnInst
 }
 export function GsnOption(_gsnNodeName: Name, _gsnNodeText: string, _gsnInstantiated: boolean): GsnNode {
   return { tag: "GsnOption", _gsnNodeName, _gsnNodeText, _gsnInstantiated };
-}
-
-/** Haskell `show` of a `Bool`. */
-function showBool(b: boolean): string {
-  return b ? "True" : "False";
 }
 
 /** Derived `instance Show GsnNode`. */
@@ -912,8 +921,7 @@ export function gsnBoxDecoration(
         movePoint(basePoint, [decoSize / 2, decoSize]),
       );
       const diamond = diamondCorners(decoBox); // Safe because this is not NoBox
-      const [p1, p2, p3, p4] = diamond;
-        // Starting from the left corner going clockwise.
+      const [p1, p2, p3, p4] = diamond; // Starting from the left corner going clockwise.
       if (instantiated && developed) return [];
       if (!instantiated && developed) return [diamond];
       if (instantiated && !developed) return [[p1, p2, p3]]; // Triangle from upper half of diamond.
@@ -1459,8 +1467,8 @@ export function gsnToolbar<V>(
   const compile1 = (
     m: Model<V>,
     a: DiagramAppearance<GsnDiagramType<V>, V>,
-    vctx: any,
-  ): any => fromRight(vctx, evalModelEdit(cls, cls._Gsn, m,
+    vctx: GenericContext<GsnDiagramType<V>, V>,
+  ): GenericContext<GsnDiagramType<V>, V> => fromRight(vctx, evalModelEdit(cls, cls._Gsn, m,
     (c: ModelEditCtx<V, GsnItem<V>>) => compileAppearance(dtc, c, diagramAppearanceClean(a), vctx)));
   const newBoxTool = (creator: (ctx: ModelEditCtx<V, GsnItem<V>>) => GsnNode): Action<D> =>
     mkScriptAction<D>(function* (d) {

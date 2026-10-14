@@ -21,26 +21,68 @@ interface VisibleRow {
   depth: number;
   hasChildren: boolean;
   expanded: boolean;
+  /** The row is the last of its siblings. */
+  last: boolean;
+  /** `more[j]`: the ancestor of the row at depth `j` has a following sibling (for tree lines). */
+  more: boolean[];
 }
 
 function visibleRows(v: TreeView): VisibleRow[] {
   const m = v.model;
   if (!m) return [];
   const out: VisibleRow[] = [];
-  const go = (nodes: RowNode[], prefix: number[], depth: number) => {
+  const go = (nodes: RowNode[], prefix: number[], depth: number, more: boolean[]) => {
     nodes.forEach((n, i) => {
       const path = new TreePath([...prefix, i]);
       const expanded = v.isExpanded(n);
-      out.push({ node: n, path, depth, hasChildren: n.children.length > 0, expanded });
-      if (expanded) go(n.children, path.indices, depth + 1);
+      const last = i === nodes.length - 1;
+      out.push({ node: n, path, depth, hasChildren: n.children.length > 0, expanded, last, more });
+      if (expanded) go(n.children, path.indices, depth + 1, [...more, !last]);
     });
   };
-  go(m.roots(), [], 0);
+  go(m.roots(), [], 0, []);
   return out;
+}
+
+/** Indentation of one tree level, and the centre of the expander of level `k`, in pixels. */
+const LEVEL_INDENT = 18;
+const expanderCentre = (k: number): number => 12 + LEVEL_INDENT * k;
+
+/**
+ * The tree lines of a row (`enable-tree-lines`), drawn as `gtk_tree_view_bin_draw` does: a dotted
+ * elbow from the parent's expander to the row (stopping before the row's own expander when it has
+ * children), continued downwards unless the row is the last child, and a vertical line for every
+ * ancestor that has following siblings. Rows at the top level have no lines.
+ */
+function TreeLines({ row }: { row: VisibleRow }) {
+  const d = row.depth;
+  if (d < 1) return null;
+  const x = (k: number) => expanderCentre(k) + 0.5;
+  const hEnd = row.hasChildren ? 2 + LEVEL_INDENT * d : expanderCentre(d);
+  const lines: React.ReactElement[] = [
+    <line key="v" x1={x(d - 1)} y1="0" x2={x(d - 1)} y2={row.last ? "50%" : "100%"} />,
+    <line key="h" x1={x(d - 1)} y1="50%" x2={hEnd} y2="50%" />,
+  ];
+  for (let j = d - 1; j >= 1; j--) {
+    if (row.more[j]) lines.push(<line key={"a" + j} x1={x(j - 1)} y1="0" x2={x(j - 1)} y2="100%" />);
+  }
+  return (
+    <svg className="gtk-tree-lines" width={expanderCentre(d) + 1} aria-hidden="true">
+      <g stroke="currentColor" strokeWidth="1" strokeDasharray="1 1" shapeRendering="crispEdges">{lines}</g>
+    </svg>
+  );
 }
 
 /** Shared drag state for tree view drag and drop within the page. */
 let dragState: { view: TreeView; paths: TreePath[]; ctx: DragContext } | null = null;
+
+/**
+ * The tree view drag in progress, if any: its context and dragged paths. Other drop targets
+ * (drawing areas set up with `widgetDragDestSet`) use it for their drag signals.
+ */
+export function currentTreeDrag(): { readonly paths: TreePath[]; readonly ctx: DragContext } | null {
+  return dragState;
+}
 
 function colourOf(p: Record<string, any>, key: "foreground" | "background"): string | undefined {
   const rgba = p[key + "Rgba"];
@@ -511,9 +553,11 @@ export function TreeViewView({ w, layout }: { w: TreeView; layout?: LayoutStyle 
                   draggable={w.dragSource || w.reorderable}
                   data-col={realCi}
                   data-path={row.path.toString()}
-                  style={first || cellBg ? { ...(first ? { paddingLeft: 4 + row.depth * 18 } : {}), ...(cellBg ? { background: cellBg } : {}) } : undefined}
+                  style={first || cellBg ? { ...(first ? { paddingLeft: 4 + row.depth * LEVEL_INDENT } : {}), ...(cellBg ? { background: cellBg } : {}), ...(first && w.enableTreeLines ? { position: "relative" as const } : {}) } : undefined}
                 >
-                  {first ? (
+                  {first && w.enableTreeLines ? <TreeLines row={row} /> : null}
+                  {/* GTK draws no expanders (and reserves no space for them) for a list-only model. */}
+                  {first && !(m && m.listOnly()) ? (
                     <span
                       className={"gtk-expander" + (row.hasChildren ? (row.expanded ? " expanded" : " collapsed") : "")}
                       onMouseDown={(e) => {

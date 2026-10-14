@@ -13,11 +13,11 @@ import { newGenerator } from "@/banana-ui/base/Data/UUID/Generate";
 import { GadgetData, pure_Changes } from "@/banana-ui/base/Reactive/Banana/Common";
 import { renderGadget } from "@/banana-ui/gtk/src/Reactive/Banana/GI/ArrowDialog";
 import {
-  Name, entityStampsAsFields, modelStartState, nameField, runModelEdit,
+  Name, entityStampsAsFields, entityVariantProperties, modelStartState, nameField, runModelEdit,
   type Entity, type Model, type ModelId,
 } from "@/hades/src/Model/Abstract/PackageTree";
 import type { ModelScriptAct } from "@/hades/src/Model/Abstract/DiagramType";
-import { migrateField } from "@/hades/src/Model/Reflection/Types";
+import { BuiltInDef, Field, migrateField } from "@/hades/src/Model/Reflection/Types";
 import { ExtInt, ExtText, type ExtensionValues } from "@/hades/src/Model/Reflection/Values";
 import {
   ColumnGroup, ExprColumn, FieldColumn, FieldColumnData, LookupColumn, Matrix, MatrixColumn, QueryColumn,
@@ -158,6 +158,64 @@ describe("Matrix tables", () => {
   it("makes a field column gadget that sends an edit script", () => {
     const g = fieldColumn<null, RV>(riskClass, M.elems(model.modelFields).find((f) => f._fieldName === "Business Unit")!, Nothing);
     expect(g.tag).toBe("Dot");
+  });
+
+  it("edits optional text fields in a folded label, deleting the value when emptied", () => {
+    const bu = M.elems(model.modelFields).find((f) => f._fieldName === "Business Unit")!;
+    const optional = Field(false, bu.fieldId, bu._fieldName, "Optional", BuiltInDef("ModelText"));
+    const risk = risks[0];
+    const values = view(entityVariantProperties(riskClass, model), entity(risk.identity));
+    expect(M.lookup(bu.fieldId, values)).toEqual(Just(ExtText(risk.extensions["Business Unit"].value)));
+    const ws: Gtk.Widget[] = [];
+    const [out, sent] = B.liftMomentIO(() => {
+      const initial = GadgetData(true, [risk.identity, values] as readonly [ModelId, ExtensionValues]);
+      const o = renderGadget(theme, (w) => ws.push(w), model, initial, pure_Changes(model), B.never(), B.pureB(initial),
+        fieldColumn<null, RV>(riskClass, optional, Nothing));
+      const s: W[] = [];
+      B.subscribeE(o.gadgetEvents, (x) => s.push(...x));
+      return [o, s] as const;
+    });
+    // displayText: a label in a button, with a popover entry for editing.
+    const labels = out.gadgetView.flatMap(allWidgets).filter((w): w is Gtk.Label => w instanceof Gtk.Label);
+    expect(labels.map((l) => Gtk.labelGetText(l))).toEqual([risk.extensions["Business Unit"].value]);
+    const entry = ws.find((w): w is Gtk.Entry => w instanceof Gtk.Entry);
+    if (entry === undefined) throw new Error("no entry");
+    const apply = (script: W) => {
+      const r = runModelEdit(riskClass, identity<RV>(), modelStartState(newGenerator(), model), (ctx) => {
+        const step = script(ctx).next();
+        expect(step.done).toBe(true);
+        return step.value as Maybe<string>;
+      });
+      if (r.tag === "Left") throw new Error("script failed");
+      const e = M.lookup(risk.identity, r.value[0].updateNewModel.modelContents);
+      return [r.value[0].updateValue, e.tag === "Just" ? e.value._entityExtensions : M.empty<string, never>()] as const;
+    };
+    Gtk.entrySetText(entry, "Bridge");
+    entry.emit("activate");
+    expect(sent.length).toBe(1);
+    const [msg1, exts1] = apply(sent[0]);
+    expect(msg1).toEqual(Just("Edited " + risk.contents.name.trim()));
+    expect(M.lookup(bu.fieldId, exts1)).toEqual(Just(ExtText("Bridge")));
+    Gtk.entrySetText(entry, "");
+    entry.emit("activate");
+    expect(sent.length).toBe(2);
+    const [, exts2] = apply(sent[1]);
+    expect(M.member(bu.fieldId, exts2)).toBe(false);
+  });
+
+  it("uses the link field for a linked column", () => {
+    const pv = M.elems(model.modelFields).find((f) => f._fieldName === "Previous Version")!;
+    const risk = risks.find((r) => r.extensions["Previous Version"])!;
+    const values = view(entityVariantProperties(riskClass, model), entity(risk.identity));
+    const [out] = B.liftMomentIO(() => {
+      const initial = GadgetData(true, [risk.identity, values] as readonly [ModelId, ExtensionValues]);
+      const o = renderGadget(theme, () => {}, model, initial, pure_Changes(model), B.never(), B.pureB(initial),
+        fieldColumn<null, RV>(riskClass, pv, Just(pv.fieldId)));
+      return [o] as const;
+    });
+    const buttons = out.gadgetView.flatMap(allWidgets).filter((w): w is Gtk.LinkButton => w instanceof Gtk.LinkButton);
+    expect(buttons.length).toBe(1);
+    expect(Gtk.linkButtonGetUri(buttons[0])).toBe(risk.extensions["Previous Version"].value);
   });
 
   it("wraps matrices in a view", () => {

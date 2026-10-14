@@ -19,6 +19,7 @@ import * as W from "./Widgets";
 import { ComboBox, ComboBoxText, IconView } from "./Choosers";
 import { TreeView } from "./TreeView";
 import { iconUrl } from "./IconTheme";
+import { isSvgUrl, svgUrlWithFonts } from "./SvgFonts";
 import { actionEnabledFor } from "./Widgets";
 import { onAnyActionEnabledChanged } from "../Gio";
 import { eventKeyFromDom, modifiersOf, type EventButton } from "../Gdk";
@@ -238,6 +239,18 @@ function renderKind(w: Widget, layout?: LayoutStyle): React.ReactElement | null 
 // ---------------------------------------------------------------------------------------------
 // Containers
 
+/**
+ * True if GTK may give the widget less height than its content needs: its subtree holds a widget
+ * whose minimum height is below its natural height (a scrolled window, a drawing area, a
+ * `GtkLayout`). A GTK box never allocates a child less than its minimum height, so any other
+ * expanding child keeps its content height when a box is short of space (e.g. the frames of a
+ * dialog whose table shrinks to fit the screen).
+ */
+function mayShrinkVertically(w: Widget): boolean {
+  if (w instanceof W.ScrolledWindow || w instanceof W.DrawingArea || w instanceof W.Layout) return true;
+  return w.getChildren().some(mayShrinkVertically);
+}
+
 function childLayout(c: Widget, horizontal: boolean, expandAll: boolean): LayoutStyle {
   const p = c.packing;
   const expand = p.expand || expandAll || (horizontal ? c.hexpandSet && c.hexpand : c.vexpandSet && c.vexpand);
@@ -248,7 +261,9 @@ function childLayout(c: Widget, horizontal: boolean, expandAll: boolean): Layout
   };
   if (expand) {
     if (horizontal) s.minWidth = 0;
-    else s.minHeight = 0;
+    // A scrolled window is a scroll container, whose automatic minimum height is already 0; it
+    // keeps a CSS `min-height` from its style classes (e.g. `memo-medium`), as in GTK.
+    else if (!(c instanceof W.ScrolledWindow) && mayShrinkVertically(c)) s.minHeight = 0;
   }
   if (p.padding) {
     if (horizontal) {
@@ -267,6 +282,77 @@ function childLayout(c: Widget, horizontal: boolean, expandAll: boolean): Layout
     s.justifyContent = main === "AlignStart" ? "flex-start" : main === "AlignEnd" ? "flex-end" : "center";
   }
   return s;
+}
+
+/**
+ * Keep every child of a vertical box below `root` (a dialog's content element) at least as tall
+ * as its content, and return the function that stops doing so.
+ *
+ * `childLayout` lets an expanding child that holds a scrolled window shrink (`min-height: 0`), but
+ * CSS cannot express the GTK minimum of such a child (the sum of its children's minimums: a
+ * scrolled window only shrinks to its CSS `min-height`, e.g. `.hades-table`). In a short viewport
+ * the child was squeezed below its content, which then overlapped the widgets below it. After
+ * each layout this sets the inline `min-height` of every squeezed child to its content height,
+ * innermost first, so the dialog content scrolls instead, as a GTK window taller than the screen
+ * shows all its widgets at their minimum size. It runs again when `root`, one of these children
+ * or one of their own children is resized.
+ */
+export function keepBoxMinimums(root: HTMLElement): () => void {
+  if (typeof ResizeObserver === "undefined" || typeof requestAnimationFrame === "undefined") return () => {};
+  let frame = 0;
+  const observed = new Set<Element>();
+  const ro = new ResizeObserver(() => {
+    if (!frame) frame = requestAnimationFrame(run);
+  });
+  const depth = (e: Element): number => {
+    let n = 0;
+    for (let p = e.parentElement; p && p !== root; p = p.parentElement) n++;
+    return n;
+  };
+  function run(): void {
+    frame = 0;
+    const els: HTMLElement[] = [];
+    for (const e of Array.from(root.querySelectorAll<HTMLElement>(".gtk-box.vertical > *, .gtk-container.vertical > *"))) {
+      const own = e.dataset.gtkMinHeight;
+      if (own !== undefined && e.style.minHeight !== own) delete e.dataset.gtkMinHeight; // Re-rendered since.
+      else if (own !== undefined || e.style.minHeight === "0px") els.push(e);
+    }
+    for (const e of els) {
+      e.style.minHeight = "0px";
+      delete e.dataset.gtkMinHeight;
+    }
+    els.sort((a, b) => depth(b) - depth(a));
+    for (const e of els) {
+      const overflow = getComputedStyle(e).overflowY; // A scroll container or a clipping box is left as it is.
+      if (e.scrollHeight > e.clientHeight + 1 && (!overflow || overflow === "visible")) {
+        e.style.minHeight = `${e.scrollHeight + e.offsetHeight - e.clientHeight}px`;
+        e.dataset.gtkMinHeight = e.style.minHeight;
+      }
+    }
+    const want = new Set<Element>([root]);
+    for (const e of els) {
+      want.add(e);
+      for (const c of Array.from(e.children)) want.add(c);
+    }
+    for (const e of Array.from(observed)) {
+      if (!want.has(e)) {
+        ro.unobserve(e);
+        observed.delete(e);
+      }
+    }
+    for (const e of want) {
+      if (!observed.has(e)) {
+        ro.observe(e);
+        observed.add(e);
+      }
+    }
+  }
+  ro.observe(root);
+  observed.add(root);
+  return () => {
+    ro.disconnect();
+    if (frame) cancelAnimationFrame(frame);
+  };
 }
 
 function BoxView({ w, layout }: { w: W.Box; layout?: LayoutStyle }) {
@@ -799,7 +885,10 @@ function LabelView({ w, layout }: { w: W.Label; layout?: LayoutStyle }) {
     ...layout,
   };
   const props = baseProps(w, "", style);
-  const content = w.useMarkup ? <MarkupText markup={w.text} /> : w.useUnderline ? stripMnemonic(w.text) : w.text;
+  const plain = w.useUnderline ? stripMnemonic(w.text) : w.text;
+  // Pango gives a text ending in a newline an empty last line (so "\n" is two lines high, as the
+  // spacing labels of the welcome screen rely on); CSS does not, unless something follows it.
+  const content = w.useMarkup ? <MarkupText markup={w.text} /> : plain.endsWith("\n") ? plain + "​" : plain;
   return (
     <span
       {...props}
@@ -989,8 +1078,29 @@ function LinkButtonView({ w, layout }: { w: W.LinkButton; layout?: LayoutStyle }
   );
 }
 
+/**
+ * The URL a file image is shown from: an SVG file is given the bundled fonts it names (see
+ * `SvgFonts.ts`; librsvg would use the system fonts). The original URL is used until that is
+ * ready.
+ */
+function useFileImageUrl(file: string | null): string | null {
+  const [resolved, setResolved] = useState<readonly [string, string] | null>(null);
+  useEffect(() => {
+    if (!file || !isSvgUrl(file)) return;
+    let live = true;
+    void svgUrlWithFonts(file).then((u) => {
+      if (live) setResolved([file, u]);
+    });
+    return () => {
+      live = false;
+    };
+  }, [file]);
+  return file && resolved && resolved[0] === file ? resolved[1] : file;
+}
+
 function ImageView({ w, layout }: { w: W.Image; layout?: LayoutStyle }) {
   const size = w.pixelSize > 0 ? w.pixelSize : iconSizePixels(w.iconSize);
+  const fileUrl = useFileImageUrl(w.pixbuf ? null : w.file);
   let src: string | null = null;
   let width: number | undefined = size, height: number | undefined = size;
   if (w.pixbuf) {
@@ -999,7 +1109,7 @@ function ImageView({ w, layout }: { w: W.Image; layout?: LayoutStyle }) {
     width = w.pixelSize > 0 ? w.pixelSize : w.pixbuf.width > 0 ? w.pixbuf.width : undefined;
     height = w.pixelSize > 0 ? w.pixelSize : w.pixbuf.height > 0 ? w.pixbuf.height : undefined;
   } else if (w.file) {
-    src = w.file;
+    src = fileUrl;
     width = undefined;
     height = undefined;
   } else src = iconUrl(w.iconName, size);
@@ -1010,6 +1120,26 @@ function ImageView({ w, layout }: { w: W.Image; layout?: LayoutStyle }) {
   const props = baseProps(w, "", { width, height, ...centred });
   const el = useRef<HTMLElement | null>(null);
   if (!src) return <span {...props} />;
+  // A file image keeps its natural size when its allocation grows along a box (an expanding
+  // child): GTK draws it centred in the allocation, whereas a growing <img> would be scaled
+  // (keeping its aspect ratio, so it would also grow in height). The widget element is then a
+  // slot taking the layout, with the image centred in it.
+  const grows = !!layout && (Number(layout.flexGrow ?? 0) > 0 || /^\s*[1-9]/.test(String(layout.flex ?? "")));
+  if (w.file && grows) {
+    const slot = baseProps(w, "", { ...layout, display: "flex", alignItems: "center", justifyContent: "center" });
+    return (
+      <span
+        {...slot}
+        ref={(e) => {
+          el.current = e;
+          slot.ref(e);
+        }}
+        {...buttonEventHandlers(w, () => el.current)}
+      >
+        <img src={src} alt="" draggable={false} style={{ flex: "none" }} />
+      </span>
+    );
+  }
   return (
     <img
       {...props}

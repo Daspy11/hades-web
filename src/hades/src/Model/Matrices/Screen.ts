@@ -137,10 +137,11 @@ export function matrixDisplay<P, V>(
       return gDot(unitSecond(), message1<E, W, Inp>("The matrix has been deleted."));
     }
     const matrix = mm.value;
-    const headings = matrixTable(cls, model1, matrix);
     const compiled = compileMatrix(cls, matrix, model1);
     if (compiled.tag === "Left") return gDot(unitSecond(), errorDisplay(compiled.value));
     const queries = compiled.value;
+    // (A lazy `let` in Haskell, only used when the matrix compiles, so it is built here.)
+    const headings = matrixTable(cls, model1, matrix);
     // \input ->
     //   let (forest, warns) = getForest queries (sorts matrix) input model1
     //   in proc () -> do

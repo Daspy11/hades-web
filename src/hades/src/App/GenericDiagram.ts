@@ -74,10 +74,10 @@
  *   `commentGadget()`, `commentGadget1()` need none.
  * * **Graphics in the browser.** SVG graphics are parsed synchronously (`@/lib/GI/Rsvg`), so a
  *   bad SVG becomes an `ErrorGraphic` exactly as in Haskell. Pixel images decode asynchronously:
- *   the `PixelGraphic` is created at once and an image that fails to decode is shown with the
- *   "Cannot decode image file." message of `ErrorGraphic` when it is laid out. Images draw once
- *   loaded; the diagram canvas repaints on `Gdk.onImagesLoaded`. Importing an image file is
- *   asynchronous (`buttonIO` accepts a Promise).
+ *   the `PixelGraphic` is created at once, and once its image has failed to decode it acts as
+ *   the `ErrorGraphic` the Haskell parser returns ("Error during image decoding.", raw JSON kept
+ *   for saving; see `decodedGraphic`). Images draw once loaded; the diagram canvas repaints on
+ *   `Gdk.onImagesLoaded`. Importing an image file is asynchronous (`buttonIO` accepts a Promise).
  */
 import * as M from "@/lib/Data/Map";
 import * as S from "@/lib/Data/Set";
@@ -123,7 +123,7 @@ import {
   tellItem, updateItem, withItem, yieldProperties, yieldViews,
 } from "@/hades/src/Hades/Abstract";
 import {
-  type ArrowDecoration, type ArrowHead, type HadesLayout, type HadesRender,
+  type ArrowDecoration, type ArrowHead, type HadesEnv, type HadesLayout, type HadesRender,
   drawArrowDecoration, drawCommentBox, drawPolyLine, layoutHLine, layoutParagraphs, layoutPixbuf,
   layoutSvg, runLayout_, squareHandle, textBlock, withLineColour,
 } from "@/hades/src/Hades/GI/BasicShapes";
@@ -863,8 +863,35 @@ export function ErrorGraphic(_0: J.JSONObject, _1: string): Graphic {
   return withGraphicEq({ tag: "ErrorGraphic", _0, _1 });
 }
 
+/**
+ * Web: the message of an "ErrorGraphic" for an image that GdkPixbuf raised an exception on
+ * (`badGraphic` in the Haskell "FromJSON" instance).
+ */
+const errorDuringDecoding = "Error during image decoding.";
+
+/**
+ * Web: the JSON object each "PixelGraphic" was read from (see "decodedGraphic").
+ */
+const pixelGraphicJson = new WeakMap<Graphic, J.JSONObject>();
+
+/**
+ * Web: the graphic as the Haskell decoder would have produced it. GdkPixbuf decodes a pixel
+ * image while the JSON is parsed, and an image it cannot decode becomes an "ErrorGraphic" that
+ * keeps the raw JSON for saving. The browser decodes asynchronously, so the parser always
+ * returns a "PixelGraphic"; once its pixbuf has failed to decode, this returns the
+ * "ErrorGraphic" the Haskell parser would have returned. Equality, JSON output, layout and the
+ * comment dialog all look at the graphic through this.
+ */
+export function decodedGraphic(g: Graphic): Graphic {
+  if (g.tag !== "PixelGraphic" || !g._1.failed) return g;
+  const raw = pixelGraphicJson.get(g);
+  return raw === undefined ? g : ErrorGraphic(raw, errorDuringDecoding);
+}
+
 /** `instance Eq Graphic` */
-export function eq_Graphic(g1: Graphic, g2: Graphic): boolean {
+export function eq_Graphic(g10: Graphic, g20: Graphic): boolean {
+  const g1 = decodedGraphic(g10); // Web: see "decodedGraphic".
+  const g2 = decodedGraphic(g20);
   if (g1.tag === "VectorGraphic" && g2.tag === "VectorGraphic") return g1._0 === g2._0;
   if (g1.tag === "PixelGraphic" && g2.tag === "PixelGraphic") return equals(g1._0, g2._0);
   if (g1.tag === "ErrorGraphic" && g2.tag === "ErrorGraphic") return equals(g1._0, g2._0);
@@ -887,23 +914,40 @@ export function base64Encode(bytes: Uint8Array): string {
 }
 
 /**
- * `Data.ByteString.Base64.Lazy.decodeLenient`: decode Base64, never failing. Characters outside
- * the alphabet are skipped and a trailing incomplete group yields what bytes it can.
+ * `Data.ByteString.Base64.Lazy.decodeLenient`: decode Base64, never failing. As in
+ * base64-bytestring, the input is read in groups of four characters, skipping characters outside
+ * the alphabet; a padding character `=` is also skipped in the first two places of a group, and
+ * ends the decoding in the last two. A trailing incomplete group yields what bytes it can.
  */
 export function base64DecodeLenient(txt: string): Uint8Array {
+  const chars = Array.from(txt);
   const out: number[] = [];
-  let acc = 0;
-  let bits = 0;
-  for (const ch of txt) {
-    if (ch === "=") break;
-    const n = base64Alphabet.indexOf(ch);
-    if (n < 0) continue;
-    acc = ((acc << 6) | n) & 0xffffff;
-    bits += 6;
-    if (bits >= 8) {
-      bits -= 8;
-      out.push((acc >> bits) & 0xff);
+  const done = -1;
+  let i = 0;
+  /** The next character's value, or "done" at the end (or at a padding character, unless skipped). */
+  const look = (skipPad: boolean): number => {
+    while (i < chars.length) {
+      const ch = chars[i++];
+      if (ch === "=") {
+        if (skipPad) continue;
+        return done;
+      }
+      const n = base64Alphabet.indexOf(ch);
+      if (n >= 0) return n;
     }
+    return done;
+  };
+  while (i < chars.length) {
+    const aa = look(true);
+    const bb = look(true);
+    if (aa === done || bb === done) break;
+    const cc = look(false);
+    out.push(((aa << 2) | (bb >> 4)) & 0xff);
+    if (cc === done) break;
+    const dd = look(false);
+    out.push(((bb << 4) | (cc >> 2)) & 0xff);
+    if (dd === done) break;
+    out.push(((cc << 6) | dd) & 0xff);
   }
   return Uint8Array.from(out);
 }
@@ -912,7 +956,7 @@ export function base64DecodeLenient(txt: string): Uint8Array {
 export const JSON_Graphic: J.JSONCodec<Graphic> = (() => {
   // Catching all exceptions here because anything except a user interupt
   // indicates an unreadable file.
-  const badGraphic = (v: J.JSONObject, _e: unknown): Graphic => ErrorGraphic(v, "Error during image decoding.");
+  const badGraphic = (v: J.JSONObject, _e: unknown): Graphic => ErrorGraphic(v, errorDuringDecoding);
   const parseVector = (v: J.JSONObject): Graphic => {
     const txt = J.field(v, "svg", J.textJ);
     try {
@@ -932,9 +976,12 @@ export const JSON_Graphic: J.JSONCodec<Graphic> = (() => {
     const dat = base64DecodeLenient(J.field(v, "image", J.textJ));
     try {
       const stream = Gio.memoryInputStreamNewFromData(dat, null);
-      // Web: decoding is asynchronous, so a pixbuf is always returned (see layoutGraphic).
+      // Web: decoding is asynchronous, so a pixbuf is always returned. If the browser cannot
+      // decode it, the graphic acts as the ErrorGraphic of `v` (see "decodedGraphic").
       const pix = Gdk.pixbufNewFromStream(stream, null);
-      return PixelGraphic(dat, pix);
+      const g = PixelGraphic(dat, pix);
+      pixelGraphicJson.set(g, v);
+      return g;
     } catch (e) {
       return badGraphic(v, e);
     }
@@ -942,7 +989,8 @@ export const JSON_Graphic: J.JSONCodec<Graphic> = (() => {
   // unsafePerformIO is safe here because the contents will not change over the life of
   // the Graphic, so it doesn't matter if conversion is done now or some future time.
   return J.codec<Graphic>(
-    (g) => {
+    (g0) => {
+      const g = decodedGraphic(g0); // Web: see "decodedGraphic".
       switch (g.tag) {
         case "VectorGraphic": return J.object([["svg", g._0]]);
         case "PixelGraphic": return J.object([["image", base64Encode(g._0)]]);
@@ -955,20 +1003,22 @@ export const JSON_Graphic: J.JSONCodec<Graphic> = (() => {
 })();
 
 /** Put a graphic in a text layout. */
-export function layoutGraphic(g: Graphic): HadesLayout<void> {
+export function layoutGraphic(g0: Graphic): HadesLayout<void> {
   const errorLayout = (msg: string): HadesLayout<void> => (env, st) => {
     layoutHLine(env, st);
     layoutParagraphs([], msg)(env, st);
     layoutHLine(env, st);
   };
+  const g = decodedGraphic(g0); // Web: see "decodedGraphic".
   switch (g.tag) {
     case "VectorGraphic": return layoutSvg(Just(mkColour(C.white)), g._1);
     case "PixelGraphic": {
       const pix = g._1;
       // Web: the pixbuf decodes asynchronously. Until it has loaded it takes no space (the
-      // canvas repaints on Gdk.onImagesLoaded); if it cannot be decoded it is shown as the
-      // ErrorGraphic that the Haskell decoder would have produced.
-      if (pix.failed) return errorLayout("Cannot decode image file.");
+      // canvas repaints on Gdk.onImagesLoaded). One that cannot be decoded and was not read
+      // from JSON (so "decodedGraphic" has no raw JSON for it) is still shown as an
+      // ErrorGraphic with the message GdkPixbuf's GError gets from "badGraphic".
+      if (pix.failed) return errorLayout(errorDuringDecoding);
       if (!pix.loaded || Gdk.pixbufGetWidth(pix) <= 0 || Gdk.pixbufGetHeight(pix) <= 0) return () => {};
       return layoutPixbuf(true, Just(mkColour(C.white)), pix);
     }
@@ -1048,7 +1098,7 @@ function* commentView<T, V>(
   const uuid = HasId_Comment.identifier(c);
   const shape = view(commentShape, c);
   return {
-    viewDraw: (env: any) => {
+    viewDraw: (env: HadesEnv) => {
       drawCommentBox(shape)(env);
       runLayout_(BoxShapeClass_CommentBox.shapeInnerBox(shape), (env1, st) => {
         const g = view(commentGraphic, c);
@@ -1164,7 +1214,7 @@ export function commentGadget1<E = any, W = any>(): Gadget_<E, W, [Maybe<Graphic
   type MG = Maybe<Graphic>;
   const imageBytes = (img: MG): Maybe<Uint8Array> => {
     if (img.tag === "Nothing") return Nothing;
-    const g = img.value;
+    const g = decodedGraphic(img.value); // Web: see "decodedGraphic".
     switch (g.tag) {
       case "VectorGraphic": return Just(U.encodeUtf8(g._0));
       case "PixelGraphic": return Just(g._0);
@@ -1284,7 +1334,7 @@ function* linkView<T, V>(
     ? "✘ item deleted" // Heavy ballot X, U+2718
     : "➔ " + targetName.value; // Heavy wide-headed rightwards arrow, U+2794
   return {
-    viewDraw: (env: any) => {
+    viewDraw: (env: HadesEnv) => {
       drawCommentBox(shape)(env);
       textBlock(targetText, T.splitOn("\n\n", view(linkText, link)), BoxShapeClass_CommentBox.shapeInnerBox(shape))(env);
     },
@@ -1892,8 +1942,6 @@ function* updateArrow<T, V>(
 ): Delta<Element<T, V>, boolean> {
   type El = Element<T, V>;
   type Ends = Maybe<readonly [ModelId, Maybe<ModelId>]>;
-  /** Update the connector to point to an avatar of modelId. If it returns Nothing then
-   * the arrow cannot be made consistent with the model and should be deleted. */
   const connectNearest = function* (modelId: ModelId, exportId: Maybe<ModelId>, pt: Point): Delta<El, Maybe<ConnectorEnd>> {
     const near = yield* nearestAvatar<HadesRender, V, ModelSubtype<T>, El>(d, modelId, pt);
     if (near.tag === "Nothing") return Nothing;
@@ -1901,6 +1949,10 @@ function* updateArrow<T, V>(
     const pt2 = (yield* connectable(d).itemConnectionPoint(d, dd, exportId))(pt);
     return Just(Connected(pt2, d.cls.identifier(dd), exportId));
   };
+  /**
+   * Update the connector to point to an avatar of modelId. If it returns Nothing then
+   * the arrow cannot be made consistent with the model and should be deleted.
+   */
   const updateConnector = function* (ends: Ends, pt0: Point, old: ConnectorEnd): Delta<El, [boolean, Maybe<ConnectorEnd>]> {
     if (ends.tag === "Nothing") {
       if (old.tag === "Unconnected") return [false, Just(old)]; // Nothing has changed.

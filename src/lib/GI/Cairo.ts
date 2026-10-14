@@ -961,14 +961,13 @@ export function withPSSurface<A>(_path: string, w: number, h: number, act: (s: P
   return [r, s.document()];
 }
 /**
- * `withPDFSurface`: browsers cannot write PDF natively. The drawing is recorded as SVG and
- * converted to a single-page PDF with the drawing embedded as vector paths (see
- * `svgToPdf`). Returns the action's result and the PDF bytes.
+ * `withPDFSurface`: browsers cannot write PDF natively. The drawing is recorded by a PDF
+ * recording surface (vector paths and text, see `PdfSurface`) and written as a single-page PDF.
+ * Returns the action's result and the PDF bytes. (Same as `withPdfSurface`; the drawing used to be
+ * recorded on an SVG surface, which produced an empty page.)
  */
-export function withPDFSurface<A>(_path: string, w: number, h: number, act: (s: SvgSurface) => A): [A, Uint8Array] {
-  const s = new SvgSurface(w, h);
-  const r = act(s);
-  return [r, svgToPdf(s.target, w, h)];
+export function withPDFSurface<A>(path: string, w: number, h: number, act: (s: PdfSurface) => A): [A, Uint8Array] {
+  return withPdfSurface(path, w, h, act);
 }
 
 /** Minimal PDF writer for recorded vector drawings (paths, fills, strokes, text). */

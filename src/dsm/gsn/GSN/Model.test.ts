@@ -464,6 +464,14 @@ describe("Reflective", () => {
     expect(eq_GsnItem(goal, node(Goal(Name("G1"), "The system is safe", false, true)))).toBe(true);
     expect(eq_GsnItem(goal, sol)).toBe(false);
     expect(eq_GsnItem(diag, diag)).toBe(true);
+    expect(eq_GsnItem(diag, GsnDiagramItem<TV>(DiagramEntity(Name("Other"), diagramFromList(ecls, []), mempty_DiagramAppearance))))
+      .toBe(false);
+    expect(eq_GsnItem(edge, GsnEdgeItem<TV>(GsnEdge("SupportArrow", Name("Support1"), "CardinalityMany")))).toBe(false);
+  });
+
+  it("is cached per model dictionary, as is the codec", () => {
+    expect(Reflective_GsnItem(cls)).toBe(refl);
+    expect(JSON_GsnItem(cls)).toBe(JSON_GsnItem(cls));
   });
 });
 

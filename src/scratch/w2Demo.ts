@@ -16,14 +16,16 @@
  *  * "Clickable Image Demo": an image gadget reporting click coordinates;
  *  * "More Gadgets" (not in the original): optional values, combo boxes, a memo box, read-only
  *    text, decorations, a conditional gadget, union tabs, validation and a table whose rows
- *    open a dialog.
+ *    open a dialog;
+ *  * "Layout Gadgets" (not in the original): tab form, grid, horizontal box, enabled, exec,
+ *    display text, text validation, frame, memo popup and image display.
  *
  * Unlike the original front page (which handles one click and then deletes its buttons) the
  * buttons stay and can be used repeatedly. Dialog results are logged with `elmerLog` and shown in
  * the status area at the bottom. Random data comes from a seeded generator, so screenshots are
  * reproducible.
  *
- * `&open=dialog|matrix|forest|image|more` opens one of the demos at start-up.
+ * `&open=dialog|matrix|forest|image|more|layout` opens one of the demos at start-up.
  */
 import * as C from "@/lib/Data/Colour";
 import * as J from "@/lib/Data/Aeson";
@@ -41,6 +43,7 @@ import { readDouble, readInt, showDouble, showInt } from "@/lib/Prelude";
 import { equals } from "@/lib/Data/Ord";
 import { atomically, atomicallySync, dupTChan, newTChanIO, orElse, readTChan, writeTChan } from "@/lib/Control/Concurrent/STM";
 import { send } from "@/lib/Network/JavaScript";
+import { encodeUtf8 } from "@/lib/Data/UUID";
 import { getDataFileName } from "@/lib/System/Paths";
 import {
   GadgetData,
@@ -70,6 +73,15 @@ import {
   cond,
   dateBox,
   displayMemo,
+  displayText,
+  enabled,
+  exec,
+  frame,
+  grid,
+  imageDisplay,
+  memoPopup,
+  tabForm,
+  validateText,
   focusing,
   forestEditor,
   forestTable,
@@ -83,6 +95,7 @@ import {
   linked,
   memoBox,
   message,
+  message1,
   optional,
   readOnlyText,
   scrolled,
@@ -628,6 +641,119 @@ const extraDialog: Dialog_<null, any, Extra> = Dialog(
 );
 
 // ---------------------------------------------------------------------------------------------
+// Layout gadgets (not in demo-webit). Several of these are rendered with the quirks of the
+// original interpreter (see porting-notes/w2.md): "tabForm", "grid" and "box" show their
+// children without their own container (no tab bar, no grid), and "enabled" pushes JavaScript
+// that fails when the flag changes.
+
+interface Layout {
+  readonly title: string;
+  readonly count: number;
+  readonly cellText: string;
+  readonly cellFlag: boolean;
+  readonly boxNum: number;
+  readonly boxFlag: boolean;
+  readonly enable: boolean;
+  readonly note: string;
+  readonly kind: DemoEnum;
+  readonly execNum: number;
+  readonly shown: string;
+  readonly code: string;
+  readonly memo: string;
+  readonly popupMemo: string;
+  readonly picture: Maybe<Uint8Array>;
+}
+const field = <K extends keyof Layout>(k: K): Lens<Layout, Layout[K]> =>
+  lens((s: Layout) => s[k], (s: Layout, v: Layout[K]) => ({ ...s, [k]: v }));
+
+const layoutSvg =
+  '<?xml version="1.0" encoding="UTF-8"?>' +
+  '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="60" viewBox="0 0 120 60">' +
+  '<rect x="2" y="2" width="116" height="56" rx="8" fill="#e8f0ff" stroke="#3060c0" stroke-width="3"/>' +
+  '<circle cx="30" cy="30" r="16" fill="#f0a020"/>' +
+  '<text x="54" y="36" font-family="sans-serif" font-size="14" fill="#203060">SVG</text></svg>';
+
+const layoutDefault: Layout = {
+  title: "Tab one text",
+  count: 7,
+  cellText: "In a grid cell",
+  cellFlag: true,
+  boxNum: 12,
+  boxFlag: false,
+  enable: true,
+  note: "Enabled when ticked",
+  kind: "Foo",
+  execNum: 3,
+  shown: "Click to edit this display text",
+  code: "abc",
+  memo: "A memo shown in a frame.",
+  popupMemo: "Click to edit this memo in a dialog.",
+  picture: Just(encodeUtf8(layoutSvg)),
+};
+
+const layoutDialog: Dialog_<null, any, Layout> = Dialog(
+  "Layout Gadgets",
+  OkButton,
+  accum(
+    form<null, any, Layout>("Vertical", [
+      [
+        "Tab form:",
+        tabForm<null, any, Layout>([
+          ["First", focusing(field("title"), simpleTextBox<null, any>())],
+          ["Second", focusing(field("count"), typedTextBox<null, any, number>(showInt, readInt))],
+        ]),
+      ],
+      [
+        "Grid:",
+        grid<null, any, Layout>(["Text", "Flag"], ["Row 1"], [[focusing(field("cellText"), simpleTextBox<null, any>()), focusing(field("cellFlag"), tickBox<null, any>())]]),
+      ],
+      [
+        "Box:",
+        box<null, any, Layout>("Horizontal", [[focusing(field("boxNum"), typedTextBox<null, any, number>(showInt, readInt))], [focusing(field("boxFlag"), tickBox<null, any>())]]),
+      ],
+      ["Enable:", focusing(field("enable"), tickBox<null, any>())],
+      [
+        "Enabled:",
+        focusing(
+          lens((s: Layout): [string, boolean] => [s.note, s.enable], (s: Layout, v: string) => ({ ...s, note: v })),
+          enabled(simpleTextBox<null, any>()),
+        ),
+      ],
+      ["Kind:", focusing(field("kind"), boundedCombo<null, any, DemoEnum>(demoEnumValues))],
+      [
+        "Exec:",
+        focusing(
+          lens((s: Layout): [DemoEnum, number] => [s.kind, s.execNum], (s: Layout, v: number) => ({ ...s, execNum: v })),
+          exec((k: DemoEnum) =>
+            k === "Foo" || k === "Bar"
+              ? typedTextBox<null, any, number>(showInt, readInt)
+              : message1<null, any, number>("No number editor for " + k),
+          ),
+        ),
+      ],
+      ["Display text:", focusing(field("shown"), displayText<null, any>())],
+      [
+        "Validate text:",
+        focusing(
+          field("code"),
+          validateText((t: string) => (t.length <= 5 ? Nothing : Just("At most five characters, please.")), simpleTextBox<null, any>()),
+        ),
+      ],
+      ["Frame:", frame((s: Layout) => Just("Frame for " + s.title), focusing(field("memo"), memoBox<null, any>("MemoSmall", false)))],
+      [
+        // Its own field: two editors of the same field in a form overwrite each other's edits.
+        "Memo popup:",
+        focusing(
+          field("popupMemo"),
+          memoPopup<null, any, string>("MemoSmall", false, (_e, t) => t, constantDialog(Dialog("Edit memo", OkButton, memoBox<null, any>("MemoMedium", false)))),
+        ),
+      ],
+      ["Image display:", focusing(field("picture"), imageDisplay<null, any>("MemoSmall"))],
+    ]),
+  ),
+);
+
+// ---------------------------------------------------------------------------------------------
 // The page
 
 /** demo-webit `Main.choicePage`, with buttons that can be used repeatedly. */
@@ -670,6 +796,8 @@ async function choicePage(env: ElmerEnv): Promise<void> {
   showWebit(WebitClass_Webit, env, btnBox, imageBtn);
   const moreBtn = choiceButton(env, "More Gadgets");
   showWebit(WebitClass_Webit, env, btnBox, moreBtn);
+  const layoutBtn = choiceButton(env, "Layout Gadgets");
+  showWebit(WebitClass_Webit, env, btnBox, layoutBtn);
   showWebit(WebitClass_WebitContainer, env, top, btnBox);
   showWebit(WebitClass_Webit, env, top, status);
 
@@ -688,6 +816,9 @@ async function choicePage(env: ElmerEnv): Promise<void> {
   // Set up the extra gadgets popup.
   const moreTrigger = newTChanIO<readonly [null, Extra]>();
   const moreOut = mkWebitPopupSelect(env, pure_TState<boolean, null>(null), constantDialog(extraDialog), () => readTChan(moreTrigger));
+  // Set up the layout gadgets popup.
+  const layoutTrigger = newTChanIO<readonly [null, Layout]>();
+  const layoutOut = mkWebitPopupSelect(env, pure_TState<boolean, null>(null), constantDialog(layoutDialog), () => readTChan(layoutTrigger));
 
   // Respond to buttons
   let matrixShown = false;
@@ -720,6 +851,10 @@ async function choicePage(env: ElmerEnv): Promise<void> {
           writeTChan(moreTrigger, [null, extraDefault]);
           return () => {};
         }),
+        fire(layoutBtn, () => {
+          writeTChan(layoutTrigger, [null, layoutDefault]);
+          return () => {};
+        }),
       ];
       return choices.reduceRight<() => () => void>((acc, a) => () => orElseIO(a, acc), choices[choices.length - 1])();
     });
@@ -744,6 +879,14 @@ async function choicePage(env: ElmerEnv): Promise<void> {
           : "Nothing"),
     );
   });
+  elmerDaemon(WebitClass_WebitContainer, env, top, async (env1) => {
+    const [, r] = await atomically(() => readTChan(layoutOut));
+    report(
+      env1,
+      "Layout gadgets output = " +
+        (r.tag === "Just" ? JSON.stringify({ ...r.value, picture: r.value.picture.tag === "Just" ? r.value.picture.value.length + " bytes" : "Nothing" }) : "Nothing"),
+    );
+  });
 
   const open = new URLSearchParams(location.search).get("open");
   const opener: Record<string, () => void> = {
@@ -758,6 +901,7 @@ async function choicePage(env: ElmerEnv): Promise<void> {
       demoImageAction(env, report);
     },
     more: () => atomicallySync(() => writeTChan(moreTrigger, [null, extraDefault])),
+    layout: () => atomicallySync(() => writeTChan(layoutTrigger, [null, layoutDefault])),
   };
   if (open !== null && opener[open] !== undefined) opener[open]();
 }

@@ -14,10 +14,10 @@ import { newGenerator } from "@/banana-ui/base/Data/UUID/Generate";
 import { GadgetData, pure_Changes } from "@/banana-ui/base/Reactive/Banana/Common";
 import { renderGadget } from "@/banana-ui/gtk/src/Reactive/Banana/GI/ArrowDialog";
 import {
-  Name, modelStartState, nameField, runModelEdit,
+  Name, modelStartState, nameField, runModelEdit, withStampFields,
   type Model, type ModelEdit, type ModelId,
 } from "@/hades/src/Model/Abstract/PackageTree";
-import { migrateField } from "@/hades/src/Model/Reflection/Types";
+import { migrateField, withBuiltIn } from "@/hades/src/Model/Reflection/Types";
 import {
   ColumnGroup, ExprColumn, FieldColumn, FieldColumnData, LookupColumn, Matrix, MatrixColumn, QueryColumn,
   SortOrder, def_FieldColumnData,
@@ -248,6 +248,112 @@ describe("Design menus and dialogs", () => {
     expect(title(col("C", ExprColumn(true, "")))).toEqual(["Field Column", "OkApplyButton"]);
     expect(title(col("C", QueryColumn(U.nil)))).toEqual(["Query Column", "OkApplyButton"]);
     expect(title(col("C", LookupColumn(U.nil)))).toEqual(["Lookup Column", "OkApplyButton"]);
+  });
+});
+
+describe("Column dialogs in the GTK toolkit", () => {
+  const theme = Gtk.iconThemeGetDefault();
+  const allWidgets = (w: Gtk.Widget): Gtk.Widget[] => [w, ...w.getChildren().flatMap(allWidgets)];
+  const render = (item: DesignItem) => B.liftMomentIO(() => {
+    const d = itemDialog<RV, null>(riskClass, item);
+    if (d.tag === "Nothing") throw new Error("no dialog");
+    const initial = GadgetData(true, item);
+    const o = renderGadget(theme, () => {}, model, initial, pure_Changes(model), B.never(), B.pureB(initial), d.value.dialogGadget);
+    const seen: DesignItem[] = [];
+    B.subscribeE(o.gadgetUser, (x) => { if (x._gdOk) seen.push(x._gdValue); });
+    return [o.gadgetView.flatMap(allWidgets), seen] as const;
+  });
+
+  it("offers every field for the text and only URL fields for the link", () => {
+    const pv = fid("Previous Version");
+    const [ws, seen] = render(col("Old", FieldColumn(FieldColumnData(pv, Just(pv)))));
+    const combos = ws.filter((w): w is Gtk.ComboBox => w instanceof Gtk.ComboBox);
+    expect(combos.length).toBe(2);
+    // Field names sorted, including the built-in and stamp fields.
+    const names = M.elems(withStampFields(withBuiltIn(model.modelFields))).map((f) => f._fieldName).sort();
+    expect(Gtk.comboBoxGetActive(combos[0])).toBe(names.indexOf("Previous Version"));
+    // " - " then the URL fields of the model, in field ID order.
+    const urls = M.elems(model.modelFields).filter((f) => f._fieldType.tag === "BuiltInDef" && f._fieldType._0 === "ModelURL");
+    expect(urls.length).toBe(2);
+    expect(Gtk.comboBoxGetActive(combos[1])).toBe(1 + urls.findIndex((f) => f.fieldId === pv));
+    // (The input is not fed back here, so each edit applies to the initial item.)
+    Gtk.comboBoxSetActive(combos[1], 0);
+    expect(seen.at(-1)).toEqual(col("Old", FieldColumn(FieldColumnData(pv, Nothing))));
+    Gtk.comboBoxSetActive(combos[0], names.indexOf("Category"));
+    expect(seen.at(-1)).toEqual(col("Old", FieldColumn(FieldColumnData(fid("Category"), Just(pv)))));
+  });
+
+  // The tree selectors of the query, lookup and group dialogs: names of the rows, the selected
+  // rows, and picking a row by name.
+  const treeRows = (vw: Gtk.TreeView): [string, Gtk.TreePath][] => {
+    const rows: [string, Gtk.TreePath][] = [];
+    Gtk.treeModelForeach(Gtk.treeViewGetModel(vw)!, (m, p, it) => {
+      rows.push([Gtk.fromGValue<string>(Gtk.treeModelGetValue(m, it, 0)), p]);
+      return false;
+    });
+    return rows;
+  };
+  const selectedNames = (vw: Gtk.TreeView): string[] => {
+    const [paths, m] = Gtk.treeSelectionGetSelectedRows(Gtk.treeViewGetSelection(vw));
+    return paths.map((p) => Gtk.fromGValue<string>(Gtk.treeModelGetValue(m!, Gtk.treeModelGetIter(m!, p)[1], 0)));
+  };
+  const pick = (vw: Gtk.TreeView, name: string | null): void => {
+    const sel = Gtk.treeViewGetSelection(vw);
+    Gtk.treeSelectionUnselectAll(sel);
+    if (name === null) return;
+    const row = treeRows(vw).find(([n]) => n === name);
+    if (!row) throw new Error("no row " + name);
+    Gtk.treeSelectionSelectPath(sel, row[1]);
+  };
+  const treeViews = (ws: Gtk.Widget[]): Gtk.TreeView[] => ws.filter((w): w is Gtk.TreeView => w instanceof Gtk.TreeView);
+  const treeViewOf = (ws: Gtk.Widget[]): Gtk.TreeView => {
+    const vws = treeViews(ws);
+    expect(vws.length).toBe(1);
+    return vws[0];
+  };
+
+  it("picks the query of a query column, the nil query meaning none", () => {
+    const [ws, seen] = render(col("Q", QueryColumn(controlsQ)));
+    const vw = treeViewOf(ws);
+    const names = treeRows(vw).map(([n]) => n);
+    expect(names).toContain("Finding Risks");
+    expect(names).not.toContain("Inherent Risk Level");
+    expect(selectedNames(vw)).toEqual(["Controls for Risks"]);
+    pick(vw, "Finding Risks");
+    expect(seen.at(-1)).toEqual(col("Q", QueryColumn(risksQ)));
+    pick(vw, null);
+    expect(seen.at(-1)).toEqual(col("Q", QueryColumn(U.nil)));
+  });
+
+  it("picks the lookup table of a lookup column", () => {
+    const [ws, seen] = render(col("L", LookupColumn(U.nil)));
+    const vw = treeViewOf(ws);
+    expect(treeRows(vw).map(([n]) => n)).not.toContain("Finding Risks");
+    expect(selectedNames(vw)).toEqual([]);
+    pick(vw, "Inherent Risk Level");
+    expect(seen.at(-1)).toEqual(col("L", LookupColumn(inherentQ)));
+  });
+
+  it("picks the query of a group and shows its sort order", () => {
+    const sortByName = SortOrder([[nameField, "Ascending"]]);
+    const [ws, seen] = render(DesignQuery(risksQ, sortByName));
+    // The query picker, then the sort order table (with its blank row for additions).
+    const [vw, sortTable] = treeViews(ws);
+    expect(treeViews(ws).length).toBe(2);
+    expect(treeRows(sortTable).map(([row]) => row as unknown)).toEqual([["Name", "Ascending"], [" -?- ", "Ascending"]]);
+    expect(selectedNames(vw)).toEqual(["Finding Risks"]);
+    pick(vw, "Controls for Risks");
+    expect(seen.at(-1)).toEqual(DesignQuery(controlsQ, sortByName));
+  });
+
+  it("edits the heading and formula of a formula column", () => {
+    const [ws, seen] = render(col("F", ExprColumn(false, "Name")));
+    const [heading] = ws.filter((w): w is Gtk.Entry => w instanceof Gtk.Entry);
+    heading.userSetText("Formula");
+    expect(seen.at(-1)).toEqual(col("Formula", ExprColumn(false, "Name")));
+    const [tick] = ws.filter((w): w is Gtk.CheckButton => w instanceof Gtk.CheckButton);
+    Gtk.toggleButtonSetActive(tick, true);
+    expect(seen.at(-1)).toEqual(col("F", ExprColumn(true, "Name")));
   });
 });
 
