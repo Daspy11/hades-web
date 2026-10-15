@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   dataFileExists,
   dataFileUrl,
+  devCssUrl,
   fetchDataFile,
   getDataDir,
   getDataFileName,
@@ -34,6 +35,12 @@ describe("System.Paths", () => {
     expect(getDataFileName("hades", "./hicolor/../report.css")).toBe(url);
     expect(dataFileUrl(getDataDir("hades") + "/report.css")).toBe(url);
     expect(isDataFile("/src/hades/share/report.css")).toBe(true);
+    // The development server serves a plain `.css` URL as a JavaScript module; `?direct` gives the
+    // stylesheet itself (the HTML report embedded the HMR module instead of the CSS).
+    if (url !== "/src/hades/share/report.css") expect(url).toMatch(/\.css\?direct$/);
+    expect(devCssUrl("/src/hades/share/report.css")).toBe("/src/hades/share/report.css?direct");
+    expect(devCssUrl("/src/dsm/share/examples/2 FMEA.dsm")).toBe("/src/dsm/share/examples/2 FMEA.dsm");
+    expect(devCssUrl("")).toBe("");
     // Unknown files keep their (virtual) path, as Cabal does not check existence.
     expect(getDataFileName("hades", "share/hades-gtk.css")).toBe("/src/hades/share/share/hades-gtk.css");
   });

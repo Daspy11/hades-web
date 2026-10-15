@@ -459,7 +459,7 @@ function LayoutView({ w, layout }: { w: W.Layout; layout?: LayoutStyle }) {
   // Outside a scrolled window the contents follow the layout's adjustments (which may be shared
   // with a scrolled window elsewhere).
   const scrolled = w.parent instanceof W.ScrolledWindow;
-  const [offset, setOffset] = useState<[number, number]>([0, 0]);
+  const [offset, setOffset] = useState<[number, number]>(() => [w.hadj.value, w.vadj.value]);
   useEffect(() => {
     if (scrolled) return;
     const update = () => setOffset([w.hadj.value, w.vadj.value]);

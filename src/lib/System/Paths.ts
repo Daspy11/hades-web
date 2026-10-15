@@ -82,7 +82,7 @@ const allFiles: ReadonlyMap<string, string> = new Map(
  * HMR wrapper), not the stylesheet; `?direct` makes it serve the CSS itself (as for a `<link>`).
  * Production asset URLs are left alone.
  */
-function devCssUrl(url: string): string {
+export function devCssUrl(url: string): string {
   return url && import.meta.env?.DEV && /\.css$/.test(url) ? url + "?direct" : url;
 }
 
