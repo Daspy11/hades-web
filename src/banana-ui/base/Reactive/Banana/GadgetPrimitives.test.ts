@@ -82,7 +82,7 @@ describe("showGadget", () => {
       ["Flag", Pure(() => (s: string) => s)],
     ]);
     expect(drawTree(showGadget(g))).toBe(
-      ["Form Vertical", "|", "+- Name: Dot", "|  |", "|  +- TextBox", "|  |", "|  `- Pure", "|", "`- Flag: Pure"].join("\n"),
+      ["Form Vertical", "|", "+- Name: Dot", "|  |", "|  +- TextBox", "|  |", "|  `- Pure", "|", "`- Flag: Pure", ""].join("\n"),
     );
   });
 

@@ -41,7 +41,7 @@ describe("demo-arrow Main", () => {
     const loop = clickOpening(buttonLabelled(window, "Show Loop dialog"));
     expect(loop.title).toBe("Loop Demo 1");
     expect(log).toHaveBeenLastCalledWith(drawTree(showGadget(loopDialog1.dialogGadget)));
-    expect(log).toHaveBeenLastCalledWith("GetInitial");
+    expect(log).toHaveBeenLastCalledWith("GetInitial\n");
     buttonLabelled(loop.contentArea, "+5").click();
     buttonLabelled(loop.contentArea, "+10").click();
     buttonLabelled(loop.contentArea, "+1").click();
