@@ -189,14 +189,17 @@ function ToolItemView({ it }: { it: Widget }) {
   }
   if (it instanceof W.MenuToolButton) {
     const menu = it.menu;
+    // The Radix trigger opens on pointer down unless it is disabled itself (a disabled child
+    // button still receives pointer events), so the trigger gets the arrow's state too.
+    const arrowDisabled = !itemEnabled(it) || !menu || menu.children.length === 0;
     return (
       <span className="gtk-menutoolbutton" title={it.tooltip ?? undefined}>
         <RToolbar.Button className="gtk-toolbutton" disabled={!itemEnabled(it)} onClick={() => it.click()} aria-label={it.label ? stripMnemonic(it.label) : undefined} title={it.tooltip ? undefined : it.label ? stripMnemonic(it.label) : undefined} data-style={styleOf(it)}>
           <ToolButtonInner t={it} size={24} />
         </RToolbar.Button>
         <Dropdown.Root modal={false}>
-          <Dropdown.Trigger asChild>
-            <RToolbar.Button className="gtk-toolbutton gtk-menutoolbutton-arrow" disabled={!itemEnabled(it) || !menu || menu.children.length === 0} aria-label={it.arrowTooltip ?? "More"}>
+          <Dropdown.Trigger asChild disabled={arrowDisabled}>
+            <RToolbar.Button className="gtk-toolbutton gtk-menutoolbutton-arrow" disabled={arrowDisabled} aria-label={it.arrowTooltip ?? "More"}>
               <img src={iconUrl("pan-down-symbolic", 16) ?? undefined} width={12} height={12} alt="" />
             </RToolbar.Button>
           </Dropdown.Trigger>

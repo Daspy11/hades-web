@@ -427,6 +427,38 @@ export function processHistoryClick<V>(
  */
 let panic: (err: unknown) => void = (err) => console.error(err);
 
+/**
+ * Web: how long (ms) the active editor must stay the same before it is recorded in the browser
+ * history (see "modelMain").
+ */
+const activeSettleTime = 100;
+
+/**
+ * Web: an input whose values are passed on to `act` once they have settled: `ms` milliseconds
+ * after a value is pushed when none is pending, the latest value pushed since then is passed on
+ * (earlier ones are dropped). `cancel` drops the pending value.
+ */
+export function whenSettled<A>(act: (a: A) => void, ms: number): { push: (a: A) => void; cancel: () => void } {
+  let latest: { readonly value: A } | null = null;
+  let scheduled = false;
+  return {
+    push: (a: A): void => {
+      latest = { value: a };
+      if (scheduled) return;
+      scheduled = true;
+      setTimeout(() => {
+        scheduled = false;
+        const l = latest;
+        latest = null;
+        if (l !== null) act(l.value);
+      }, ms);
+    },
+    cancel: (): void => {
+      latest = null;
+    },
+  };
+}
+
 /** Web: true once Quit has been confirmed (the unload guard then lets the page go). */
 let programHasFinished = false;
 
@@ -551,6 +583,7 @@ export async function modelMain<V>(cls: ModelMainClass<V>, descriptor: MainDescr
     if (text.tag === "Nothing") return [Nothing, emptyModel(cls, "Model")];
     const doc = J.eitherDecode(JSON_Model(cls), U.decodeUtf8(text.value));
     if (doc.tag === "Left") {
+      // Web: the file is named by "displayPath" (a virtual path means nothing to the user).
       await errorBox(window, T.pack(
         "File \"" + displayPath(target) + "\" was corrupt and could not be read.\n\n"
         + "Technical details: " + doc.value));
@@ -791,14 +824,22 @@ export async function modelMain<V>(cls: ModelMainClass<V>, descriptor: MainDescr
     typeof s === "object" && s !== null && "hadesActive" in s;
   let suppressPush = false;
   let pendingPop: ModelId | null = null;
+  // One user action can make several editors active in turn (a double click on a link in one
+  // diagram opens another, then the first diagram's own action makes it active again, then the
+  // new page's focus makes the new one active). Only the editor that is active once these have
+  // settled is recorded, so such an action adds one history entry.
+  const settledActive = whenSettled((a: ActiveEntity<P, V>) => recordActiveNow(a), activeSettleTime);
   const recordActive = (a: ActiveEntity<P, V>): void => {
     if (typeof history === "undefined") return;
+    if (suppressPush) settledActive.cancel();
+    else settledActive.push(a);
+  };
+  const recordActiveNow = (a: ActiveEntity<P, V>): void => {
     const w = a.activeWrapper;
     const st: HistoryState = {
       hadesActive: { modelId: w.wrappedEntityId, viewTag: w.tag === "ViewWrapper" ? w.viewTag : null },
     };
     const old: unknown = history.state;
-    if (suppressPush) return;
     if (pendingPop !== null && pendingPop === st.hadesActive.modelId) {
       pendingPop = null;
       history.replaceState(st, "");
@@ -810,6 +851,7 @@ export async function modelMain<V>(cls: ModelMainClass<V>, descriptor: MainDescr
     else history.replaceState(st, "");
   };
   const onPopState = (ev: PopStateEvent): void => {
+    settledActive.cancel(); // An activation not yet recorded is superseded by the navigation.
     if (!isHistoryState(ev.state) || currentOutput === null) return;
     const { modelId, viewTag } = ev.state.hadesActive;
     suppressPush = true;
@@ -1187,6 +1229,7 @@ function recoveryDialog<E, W>(contents: readonly RecoveryRow[]): Dialog_<E, W, F
   const spec = comboBox<E, W, FilePath>((_) => contents.map(([path, content, time]) => {
     const nm = content === "" ? "<unnamed file>" : content;
     const tStr = formatRecoveryTime(time);
+    // Web: the file is named by "displayPath" (a virtual path means nothing to the user).
     return ComboItem<FilePath>(tStr + ": " + T.pack(displayPath(nm)), Nothing, Nothing, path);
   }));
   return Dialog("Recover from auto-save", OkButton, simpleFrame("File to recover: ", spec));
@@ -1436,6 +1479,8 @@ export function actionImportData<V>(
           const opened = await openJsonFile(JSON_ModelExport(cls), parent, filters, Nothing);
           if (opened.tag === "Nothing") return; // Action cancelled.
           const [path, v] = opened.value as [FilePath, ModelExport<V>];
+          // Web: "Imported from" names the file by "displayPath" (here and below), not by its
+          // virtual path.
           // eslint-disable-next-line require-yield
           resultH(function* (c): ModelScript<P, V, Maybe<string>> {
             importEntities(c, targetId, v.exportRelations, v.exportContents);

@@ -35,7 +35,7 @@ async function dataUrl(url: string): Promise<string> {
 
 /** The SVG text with `@font-face` rules for the bundled fonts it names (unchanged if none). */
 export async function svgWithFonts(svg: string): Promise<string> {
-  const used = Object.keys(bundledFonts).filter((family) => new RegExp(`font-family\\s*[:=]\\s*["']?[^;"'>]*\\b${family}\\b`).test(svg));
+  const used = Object.keys(bundledFonts).filter((family) => new RegExp(`font-family\\s*[:=]\\s*["']?[^;">]*\\b${family}\\b`).test(svg));
   if (used.length === 0) return svg;
   const rules: string[] = [];
   for (const family of used) {

@@ -44,6 +44,7 @@
  *   clauses that need the enclosing variables (those are local functions).
  */
 import * as Gtk from "@/lib/GI/Gtk";
+import { svgWithFonts } from "@/lib/GI/Gtk/SvgFonts";
 import * as Gdk from "@/lib/GI/Gdk";
 import * as Cairo from "@/lib/GI/Cairo";
 import * as B from "@/lib/Reactive/Banana";
@@ -395,9 +396,23 @@ export function processModelScripts<V, A>(
       failed(ex);
       return;
     }
-    // Web: an asynchronous action is awaited before the script continues.
+    // Web: an asynchronous action is awaited before the script continues. Any other exception
+    // it raises is rethrown inside the network, where the script would have continued, so that
+    // it reaches the network's error handler (the program's panic recovery) as a synchronous one
+    // does, instead of becoming an unhandled Promise rejection.
     if (isPromiseLike(result)) {
-      Promise.resolve(result).then((r) => resultH([state, r]), failed);
+      Promise.resolve(result).then(
+        (r) => resultH([state, r]),
+        (ex: unknown) => {
+          if (isIOException(ex)) {
+            failed(ex);
+          } else {
+            resultH([state, function* (_c) {
+              throw ex;
+            }]);
+          }
+        },
+      );
     } else {
       resultH([state, result]);
     }
@@ -1288,7 +1303,8 @@ export function editorWindows<V>(
     const active = readIORef(manager.bookManagerContents).find((a) => {
       const aw = a.activeWrapper;
       if (aw.wrappedEntityId !== modelId) return false;
-      return viewTag === undefined || (aw.tag === "ViewWrapper" && aw.viewTag === viewTag);
+      // As "sameEntityView": a diagram editor has no view tag; a view editor matches its tag.
+      return viewTag === undefined ? aw.tag === "DiagramWrapper" : aw.tag === "ViewWrapper" && aw.viewTag === viewTag;
     });
     if (active === undefined) return false;
     const display = Gtk.castTo(Gtk.Notebook, Gtk.widgetGetParent(active.activeEntityWidget));
@@ -1405,7 +1421,8 @@ export async function exportDrawing(
         case "SVG": {
           const path = checkExtension("svg", target);
           const [, svg] = Cairo.withSVGSurface(path, width, height, (srf) => Cairo.renderWith(srf, drawing));
-          await writeFileData(path, svg, "image/svg+xml");
+          // Web: embed the bundled fonts (Cairo writes text as glyph outlines).
+          await writeFileData(path, await svgWithFonts(svg), "image/svg+xml");
           return;
         }
         case "Postscript": {

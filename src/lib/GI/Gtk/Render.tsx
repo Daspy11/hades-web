@@ -456,7 +456,22 @@ function LayoutView({ w, layout }: { w: W.Layout; layout?: LayoutStyle }) {
     ro.observe(el);
     return () => ro.disconnect();
   }, [w]);
-  const props = baseProps(w, "", { position: "relative", ...layout });
+  // Outside a scrolled window the contents follow the layout's adjustments (which may be shared
+  // with a scrolled window elsewhere).
+  const scrolled = w.parent instanceof W.ScrolledWindow;
+  const [offset, setOffset] = useState<[number, number]>([0, 0]);
+  useEffect(() => {
+    if (scrolled) return;
+    const update = () => setOffset([w.hadj.value, w.vadj.value]);
+    update();
+    const h = w.hadj.connect("value-changed", update);
+    const v = w.vadj.connect("value-changed", update);
+    return () => {
+      w.hadj.disconnect(h);
+      w.vadj.disconnect(v);
+    };
+  }, [w, w.hadj, w.vadj, scrolled]);
+  const props = baseProps(w, "", { position: "relative", ...(scrolled ? {} : { overflow: "hidden" }), ...layout });
   return (
     <div
       {...props}
@@ -465,7 +480,7 @@ function LayoutView({ w, layout }: { w: W.Layout; layout?: LayoutStyle }) {
         props.ref(e);
       }}
     >
-      <div style={{ position: "relative", width: w.width, height: w.height }}>
+      <div style={{ position: "relative", width: w.width, height: w.height, ...(scrolled || (offset[0] === 0 && offset[1] === 0) ? {} : { transform: `translate(${-offset[0]}px, ${-offset[1]}px)` }) }}>
         {w.children.map((c) => {
           const [x, y] = w.positions.get(c) ?? [0, 0];
           const size = w.sizes.get(c);

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import * as B from "@/lib/Reactive/Banana";
 import { Just, Nothing } from "@/lib/Data/Maybe";
 import { HistoryItem } from "@/hades/src/Model/GI/PackageTree";
@@ -6,7 +6,7 @@ import type { Model } from "@/hades/src/Model/Abstract/PackageTree";
 import { fromList, toList } from "@/hades/src/Model/Reflection/NamedRelation";
 import {
   MainDescriptor, ModelHistory, cmdOpts, emptyHistory, fixOldRelations, maxUndoLength, processHistoryClick,
-  recordUndo, redo, resolveOpenArg, undo,
+  recordUndo, redo, resolveOpenArg, undo, whenSettled,
 } from "./ModelMain";
 
 /** Stand-in models: only identity matters to the history functions. */
@@ -82,5 +82,33 @@ describe("command line (page URL)", () => {
     expect(p.tag === "Just" && p.value.startsWith("/builtin/")).toBe(true);
     expect(resolveOpenArg(desc, "no such example")).toEqual(Nothing);
     expect(resolveOpenArg(desc, "/builtin/x.dsm")).toEqual(Just("/builtin/x.dsm"));
+  });
+});
+
+describe("whenSettled (browser history of the active diagram)", () => {
+  it("passes on only the latest of the values pushed while one is pending", () => {
+    vi.useFakeTimers();
+    try {
+      const seen: string[] = [];
+      const s = whenSettled((x: string) => seen.push(x), 100);
+      // A double click on a link: the new diagram, the old one again, then the new one.
+      s.push("new");
+      s.push("old");
+      vi.advanceTimersByTime(20);
+      s.push("new");
+      expect(seen).toEqual([]);
+      vi.advanceTimersByTime(100);
+      expect(seen).toEqual(["new"]);
+      s.push("other");
+      vi.advanceTimersByTime(100);
+      expect(seen).toEqual(["new", "other"]);
+      // A navigation cancels a value that has not been passed on yet.
+      s.push("stale");
+      s.cancel();
+      vi.advanceTimersByTime(100);
+      expect(seen).toEqual(["new", "other"]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

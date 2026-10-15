@@ -30,4 +30,10 @@ describe("SvgFonts", () => {
     expect(out).not.toContain("Cantarell");
     expect(out.endsWith(`<text style="font-size:3px;font-family:Roboto;fill:#fff">x</text></svg>`)).toBe(true);
   });
+
+  test("a font-family attribute with a quoted list (Cairo SVG surface) is recognised", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(new Uint8Array([1, 2, 3])));
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg"><text font-family="'Roboto', 'Symbola', 'STIX Two Text'">x</text></svg>`;
+    expect(await svgWithFonts(svg)).toContain("@font-face{font-family:Roboto;");
+  });
 });

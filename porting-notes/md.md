@@ -22,7 +22,8 @@ moving/adding/deleting boxes, the properties dialog of a new thing, Refresh, Exp
     `a.activeWrapper.wrappedEntityId` (and `viewTag` for a `ViewWrapper`) to push a history entry.
   * `editorActivate(modelId, viewTag?) => boolean` brings an *open* editor to the front of its
     notebook, focuses its canvas and makes it active, which fires `editorActiveEntity`. It returns
-    false if no such editor is open. In that case, open it by sending an `openDiagram` script
+    false if no such editor is open. Without a view tag it matches only a diagram editor, with
+    one only the view editor of that tag (as `sameEntityView`). In that case, open it by sending an `openDiagram` script
     through `scriptE`. Call it outside a network moment, e.g. from a `popstate` handler.
     Suppress your own history push for the activation you triggered.
 * **Feed back only described updates.** As in Haskell (`processModelUpdates` keeps `Just`
@@ -60,7 +61,10 @@ moving/adding/deleting boxes, the properties dialog of a new thing, Refresh, Exp
   continuation runs once.
 * `ScriptPerformIO`: the thunk may return a Promise. It is awaited in a `reactimate` handler
   before the script continues. `IOError`/`DOMException` become user errors, as Haskell's
-  `Ex.try` of an `IOException` does. Other exceptions propagate.
+  `Ex.try` of an `IOException` does. Other exceptions propagate to the network's error handler
+  (`B.setErrorHandler`, ModelMain's panic recovery); for a rejected Promise this is done by
+  rethrowing it inside the network where the script would have continued (review fix: it used
+  to become an unhandled rejection).
 * In Haskell the continuation of `ScriptOpenDiagram` feeds straight back into the script event
   (an instantaneous cycle). The TS FRP library cannot do that, so it goes through the same
   feedback event (`nextE`) as hints and selections. It runs in the moment after the diagram is
@@ -78,3 +82,14 @@ moving/adding/deleting boxes, the properties dialog of a new thing, Refresh, Exp
   Apply button (see above).
 * Drag and drop from the tree onto a canvas is wired (`widgetDragDestSet`, `drag-drop`) but was
   not driven in headless Chrome. The test covers `diagramInsertSelection` directly.
+
+## Review (independent side-by-side check against the Haskell)
+
+* Every top-level and `where` definition was checked against `ModelDiagrams.hs`; names, argument
+  order, control flow and message texts match. Fixed: async `performIO` failures (above) and
+  `editorActivate` matching a view editor for a diagram history entry. Test added:
+  "passes other exceptions of IO actions ... to the network's error handler".
+* The known gap (no Apply button for dialogs opened from inside a diagram Delta) remains: a
+  replay restarts the Delta machine from the `HadesGtk` snapshot of the batch, which is only
+  equivalent at a quiescent point; a dialog at the end of a multi-batch command (e.g. a tool's
+  drag that creates an entity and opens its properties) would replay differently.

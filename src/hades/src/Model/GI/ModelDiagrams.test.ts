@@ -593,6 +593,39 @@ describe("processModelScripts", () => {
     expect(c.updates).toEqual([]);
   });
 
+  it("passes other exceptions of IO actions, synchronous or asynchronous, to the network's error handler", async () => {
+    const { st } = testModel();
+    const c = circuit(st);
+    const caught: unknown[] = [];
+    B.setErrorHandler((e) => caught.push(e));
+    const unhandled: unknown[] = [];
+    const onUnhandled = (e: unknown): void => {
+      unhandled.push(e);
+    };
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      c.fire(function* (ctx) {
+        yield* performIO<Pt, TV, TV, null>(ctx, () => {
+          throw new TypeError("sync bug");
+        });
+        return Just("never");
+      });
+      c.fire(function* (ctx) {
+        yield* performIO<Pt, TV, TV, null>(ctx, () => Promise.reject(new TypeError("async bug")));
+        return Just("never");
+      });
+      await tick();
+      await tick();
+      expect(caught.map((e) => (e as Error).message)).toEqual(["sync bug", "async bug"]);
+      expect(unhandled).toEqual([]);
+      expect(c.errors).toEqual([]);
+      expect(c.updates).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+      B.setErrorHandler((err) => console.error("reactimate:", err));
+    }
+  });
+
   it("runs the rest of a script again for Apply and OK in a properties dialog", () => {
     const { st, pkg } = testModel();
     const c = circuit(st);

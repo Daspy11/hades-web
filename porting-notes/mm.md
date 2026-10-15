@@ -48,7 +48,10 @@ unsaved-changes prompt), Ctrl+Q → "program finished" page.
    and ignored.
 2. Browser history: each time a diagram/view becomes active (`editorActiveEntity` of the current
    editor) a `history.pushState({hadesActive: {modelId, viewTag}})` is made (replaceState for the
-   first one). `popstate` → `editorActivate(modelId, viewTag)`; if it is not open, the entity's
+   first one). Activations are coalesced with the exported helper `whenSettled(act, ms)` (100 ms):
+   one user action can activate several editors in turn (double-clicking a link activates the new
+   diagram, then the old one again, then the new one), and only the settled one is recorded, so
+   it adds one entry (review fix: it used to push three). `popstate` → `editorActivate(modelId, viewTag)`; if it is not open, the entity's
    `cls.editableActivation(Just(ent))` script is sent (via an extra script input of
    `editorWindows`). Entries from an earlier model are ignored.
 3. Dropping a file on the page (`dragover`/`drop` on the window, only for drags carrying files):
@@ -94,3 +97,19 @@ unsaved-changes prompt), Ctrl+Q → "program finished" page.
   activation does nothing, so in the demo package names are blank in the property panel and
   GenericDiagram links are not followed; DSM.SafetyCase will provide both.
 * Message dialog button order (Yes left of No) is the toolkit's AlertDialog rendering.
+
+## Review (independent side-by-side check against the Haskell)
+
+* Every definition of `ModelMain.hs` was checked; fixed: history coalescing (above), `// Web:`
+  marks on the file names shown by `displayPath`. Driven in headless Chrome: `?open=` (name,
+  `name.dsm`, `/src/...` path, unknown name), all four menus, Help (Manual tab, About, Credits
+  error), undo/redo buttons, history menus (multi-step undo from the menu, redo menu, Ctrl+Shift+Z),
+  Find, Fields, Reference Types, Extension Fields, Import/Export Data dialogs, Recovery (confirm,
+  dialog, recovered model), New and Quit with the unsaved-changes prompt, back/forward between
+  diagrams and matrix views (also reopening a closed diagram), zoom bar, Refresh.
+* Toolkit fixes found this way: `Gtk.actionEnabledFor` (Widgets.ts) now reports a widget whose
+  action does not exist as insensitive, as GTK does (File > Import License, `win.import-license`,
+  is never added by HADES and was shown enabled); `RenderBars.tsx`: the dropdown arrow of an
+  insensitive `MenuToolButton` no longer opens its (stale) menu — the Radix trigger itself is now
+  disabled (after File > New the Undo arrow still showed the old model's history). Tests:
+  `src/lib/GI/Gtk/Actions.test.ts`, `whenSettled` in `ModelMain.test.ts`.

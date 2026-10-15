@@ -106,6 +106,9 @@ function DialogView({ d }: { d: W.Dialog }) {
             if (el) {
               e.preventDefault();
               el.focus();
+              // GTK: an entry that gets the initial focus selects its contents
+              // (`gtk-entry-select-on-focus`), so typing replaces the default name.
+              if (el instanceof HTMLInputElement && ["text", "search", "number", ""].includes(el.type)) el.select();
             }
           }}
         >

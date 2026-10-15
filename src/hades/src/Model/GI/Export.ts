@@ -28,6 +28,7 @@ import { getCurrentTime, type UTCTime } from "@/lib/Data/Time";
 import { fromXlsx, type Xlsx } from "@/lib/Codec/Xlsx";
 import * as Cairo from "@/lib/GI/Cairo";
 import * as Gtk from "@/lib/GI/Gtk";
+import { svgWithFonts } from "@/lib/GI/Gtk/SvgFonts";
 import * as H from "@/lib/Text/Blaze/Html5";
 import * as HA from "@/lib/Text/Blaze/Html5/Attributes";
 import {
@@ -93,7 +94,8 @@ async function emptyTempFile(dir: FilePath, template: string): Promise<FilePath>
 /**
  * Write the report to a temporary file and folder in HTML, then view it.
  *
- * Web: the preview is an in-memory file, opened in a new browser tab.
+ * Web: the preview is an in-memory file, opened in a new browser tab. The tab is opened first
+ * (empty) and shows the preview once it is ready.
  *
  * @param title Report title
  */
@@ -108,6 +110,11 @@ export async function previewReport<V>(
   const noWidget: Gtk.Widget | null = null;
   const previewError = (err: unknown): Promise<void> =>
     errorBox(noWindow, T.pack("File error during preview: " + showException(err)));
+  // Web: browsers only let a page open a tab shortly (about 5 s) after the user's click, and
+  // rendering the images of a large report can take longer than that; a blocked tab would fail
+  // silently. So the tab is opened now, before any work is done, and pointed at the preview
+  // once it has been written (see "openPreviewTab").
+  const tab = openPreviewTab();
   try {
     await previewFolderClean();
     const fldr = await previewFolder();
@@ -121,13 +128,51 @@ export async function previewReport<V>(
     const entry = previewFiles.get(baseName);
     previewFiles.set(baseName, { modTime: entry?.modTime ?? getCurrentTime(), url: Just(uri) });
     try {
-      Gtk.showUriOnWindow(noWindow, uri, 0); // Zero is magic timestamp value for "now".
+      if (tab !== null && !tab.closed) {
+        tab.location.replace(uri); // Web: the tab opened above.
+      } else {
+        Gtk.showUriOnWindow(noWindow, uri, 0); // Zero is magic timestamp value for "now".
+      }
     } catch (err) {
       await errorBox(noWidget, T.pack(showException(err)));
     }
   } catch (err) {
+    closePreviewTab(tab);
     if (!isIOError(err)) throw err;
     await previewError(err);
+  }
+}
+
+/**
+ * Web: open an empty browser tab for a report preview (while the user's click still allows
+ * it), saying that the preview is being prepared. Returns `null` if the browser refused (or
+ * there is no `window.open`, e.g. in tests); "previewReport" then opens the preview with
+ * `Gtk.showUriOnWindow` as before. The new tab's `opener` is cleared, as `noopener` would.
+ */
+export function openPreviewTab(): Window | null {
+  if (typeof window === "undefined" || typeof window.open !== "function") return null;
+  try {
+    const tab = window.open("", "_blank");
+    if (!tab) return null;
+    try {
+      tab.opener = null;
+      tab.document.title = "Report preview";
+      tab.document.body.textContent = "Preparing the report preview…";
+    } catch {
+      // The placeholder text is only a courtesy.
+    }
+    return tab;
+  } catch {
+    return null;
+  }
+}
+
+/** Web: close the tab of a preview that failed. */
+function closePreviewTab(tab: Window | null): void {
+  try {
+    if (tab !== null && !tab.closed) tab.close();
+  } catch {
+    // Nothing to do.
   }
 }
 
@@ -352,7 +397,9 @@ export async function binaryResourceFunc<V>(
               Cairo.renderWith(surface, draw);
               Cairo.surfaceFinish(surface);
             });
-            return Just(U.encodeUtf8(svg));
+            // Web: Cairo's SVG surface draws text as glyph outlines; the browser's SVG has
+            // `<text>` elements, so the bundled fonts are embedded to render the same anywhere.
+            return Just(U.encodeUtf8(await svgWithFonts(svg)));
           };
         }),
       );

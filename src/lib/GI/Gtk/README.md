@@ -165,7 +165,8 @@ use the page's web fonts, whereas librsvg uses the system fonts.
   Other windows are rendered as floating panels.
 * Actions use `Gio.simpleActionNew("save", null)`, `Gio.onSimpleActionActivate(a, () => ...)`,
   `Gio.actionMapAddAction(window, a)` and `Gio.setAccelsForAction(window, "win.save", ["<Control>s"])`.
-  Menu items and tool buttons take `actionName: "win.save"` through `Gtk.set` or `new_`. Keyboard
+  Menu items and tool buttons take `actionName: "win.save"` through `Gtk.set` or `new_`. As in
+  GTK, a widget bound to an action that does not exist (yet) is insensitive. Keyboard
   accelerators are handled at the window level, and the browser defaults (Ctrl+S, Ctrl+O, ...)
   are suppressed.
 * A browser tab cannot run a "save changes?" dialog when it is closed. A main window's

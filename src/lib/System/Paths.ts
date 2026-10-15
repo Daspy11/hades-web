@@ -73,9 +73,18 @@ const webitsFiles = import.meta.glob(
  */
 const allFiles: ReadonlyMap<string, string> = new Map(
   [hadesFiles, dsmFiles, gtkFiles, webitsFiles].flatMap((m) =>
-    Object.entries(m).map(([path, url]) => [path, url || path] as [string, string]),
+    Object.entries(m).map(([path, url]) => [path, devCssUrl(url) || path] as [string, string]),
   ),
 );
+
+/**
+ * The development server answers a plain fetch of a `.css` file with a JavaScript module (the
+ * HMR wrapper), not the stylesheet; `?direct` makes it serve the CSS itself (as for a `<link>`).
+ * Production asset URLs are left alone.
+ */
+function devCssUrl(url: string): string {
+  return url && import.meta.env?.DEV && /\.css$/.test(url) ? url + "?direct" : url;
+}
 
 /**
  * Normalise a path: `\` and `/` separators, empty and `.` segments dropped, `..` resolved.

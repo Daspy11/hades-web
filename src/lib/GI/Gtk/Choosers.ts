@@ -321,7 +321,7 @@ export async function nativeDialogRun(f: FileChooserNative): Promise<number> {
   if (f.action === "FileChooserActionSave") {
     let name = f.currentName || "untitled";
     if (!hasNativeSave()) {
-      const chosen = await askFileName(f.title || "Save File", name, f.transientFor);
+      const chosen = await askFileName(f.title || "Save File", name, f.transientFor, f.acceptLabel);
       if (chosen === null) return ResponseTypeCancel;
       f.filename = downloadPath(chosen);
       return ResponseTypeAccept;
@@ -344,7 +344,7 @@ export function onNativeDialogResponse(f: FileChooserNative, cb: (r: number) => 
 }
 
 /** In-app "Save As" name prompt, used when the browser has no native save dialog. */
-async function askFileName(title: string, suggested: string, parent: Window | null): Promise<string | null> {
+async function askFileName(title: string, suggested: string, parent: Window | null, acceptLabel = ""): Promise<string | null> {
   const { entryNew, entrySetText, labelNew, onEntryActivate, entryGetText } = await import("./Widgets");
   const d = new Dialog();
   d.title = title;
@@ -357,7 +357,7 @@ async function askFileName(title: string, suggested: string, parent: Window | nu
   boxPackStart(d.contentArea, lbl, false, false, 4);
   boxPackStart(d.contentArea, e, false, false, 4);
   dialogAddButton(d, "_Cancel", ResponseTypeCancel);
-  dialogAddButton(d, "_Save", ResponseTypeOk);
+  dialogAddButton(d, acceptLabel || "_Save", ResponseTypeOk);
   onEntryActivate(e, () => d.respond(ResponseTypeOk));
   registerToplevel(d);
   const r = await d.run();

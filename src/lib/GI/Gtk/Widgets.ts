@@ -607,8 +607,9 @@ export class ScrolledWindow extends Bin {
   minContentWidth = -1;
   maxContentHeight = -1;
   maxContentWidth = -1;
-  readonly hadj = new Adjustment();
-  readonly vadj = new Adjustment();
+  /** The scroll adjustments (shared with other widgets when given to `scrolledWindowNew`). */
+  hadj = new Adjustment();
+  vadj = new Adjustment();
   override setProperty(name: string, value: unknown): void {
     switch (name) {
       case "propagateNaturalHeight": this.propagateNaturalHeight = value as boolean; break;
@@ -625,8 +626,11 @@ export class ScrolledWindow extends Bin {
     this.changed();
   }
 }
-export function scrolledWindowNew(_h: Adjustment | null, _v: Adjustment | null): ScrolledWindow {
-  return new ScrolledWindow();
+export function scrolledWindowNew(h: Adjustment | null, v: Adjustment | null): ScrolledWindow {
+  const s = new ScrolledWindow();
+  if (h) s.hadj = h;
+  if (v) s.vadj = v;
+  return s;
 }
 export function scrolledWindowSetPolicy(s: ScrolledWindow, h: PolicyType, v: PolicyType): void {
   s.hpolicy = h;
@@ -661,10 +665,10 @@ export function scrolledWindowGetVadjustment(s: ScrolledWindow): Adjustment {
   return s.vadj;
 }
 export function scrollableGetHadjustment(s: ScrolledWindow | Viewport | Layout): Adjustment {
-  return s instanceof ScrolledWindow ? s.hadj : (s.parent instanceof ScrolledWindow ? s.parent.hadj : new Adjustment());
+  return s instanceof ScrolledWindow ? s.hadj : (s.parent instanceof ScrolledWindow ? s.parent.hadj : s instanceof Layout ? s.hadj : new Adjustment());
 }
 export function scrollableGetVadjustment(s: ScrolledWindow | Viewport | Layout): Adjustment {
-  return s instanceof ScrolledWindow ? s.vadj : (s.parent instanceof ScrolledWindow ? s.parent.vadj : new Adjustment());
+  return s instanceof ScrolledWindow ? s.vadj : (s.parent instanceof ScrolledWindow ? s.parent.vadj : s instanceof Layout ? s.vadj : new Adjustment());
 }
 
 export class Viewport extends Bin {
@@ -696,9 +700,19 @@ export class Layout extends Container {
   positions = new Map<Widget, [number, number]>();
   /** Sizes of children given by `widgetSizeAllocate` (otherwise their natural size). */
   sizes = new Map<Widget, [number, number]>();
+  /**
+   * The layout's scroll adjustments. Outside a scrolled window the contents are shown offset by
+   * their values, so a layout given another widget's adjustment scrolls with it (e.g. a table
+   * header above a scrolled body).
+   */
+  hadj = new Adjustment();
+  vadj = new Adjustment();
 }
-export function layoutNew(_h: Adjustment | null, _v: Adjustment | null): Layout {
-  return new Layout();
+export function layoutNew(h: Adjustment | null, v: Adjustment | null): Layout {
+  const l = new Layout();
+  if (h) l.hadj = h;
+  if (v) l.vadj = v;
+  return l;
 }
 export function layoutSetSize(l: Layout, w: number, h: number): void {
   l.width = w;
@@ -2095,7 +2109,11 @@ export function activateActionFrom(w: Widget, actionName: string): void {
   console.warn("No action " + actionName);
 }
 
-/** Look up whether an action is enabled (for widgets bound to actions). */
+/**
+ * Look up whether an action is enabled (for widgets bound to actions). As in GTK, a widget whose
+ * action does not exist (e.g. the glade file's `win.import-license`, which HADES never adds) is
+ * insensitive.
+ */
 export function actionEnabledFor(w: Widget, actionName: string): boolean {
   const name = actionName.replace(/^(win|app)\./, "");
   for (const t of mainWindows) if (t.actions.has(name)) return t.actions.get(name)!.enabled;
@@ -2104,7 +2122,7 @@ export function actionEnabledFor(w: Widget, actionName: string): boolean {
     if (cur instanceof Window && cur.actions.has(name)) return cur.actions.get(name)!.enabled;
     cur = cur.parent ?? (cur instanceof Menu ? cur.attachWidget : null);
   }
-  return true;
+  return false;
 }
 
 /** Application windows, in creation order. */
