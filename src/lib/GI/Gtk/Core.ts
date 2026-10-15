@@ -690,7 +690,8 @@ export function widgetGrabFocus(w: Widget): void {
     const target = el.matches("input,textarea,select,button,[tabindex]") ? el : el.querySelector<HTMLElement>("input,textarea,select,button,[tabindex]");
     (target ?? el).focus();
     // GTK: `gtk_widget_grab_focus` on an entry selects its contents (`gtk-entry-select-on-focus`).
-    if (target instanceof HTMLInputElement && ["text", "search", "number", ""].includes(target.type)) target.select();
+    // Only for the entry itself, not for an input found inside a container.
+    if (w.kind === "entry" && target instanceof HTMLInputElement && ["text", "search", "number", ""].includes(target.type)) target.select();
   };
   if (w.el) focus();
   else requestAnimationFrame(focus);

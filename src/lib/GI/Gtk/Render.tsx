@@ -512,7 +512,10 @@ function GridView({ w, layout }: { w: W.Grid; layout?: LayoutStyle }) {
     if (computeExpand(c, false)) for (let i = t; i < t + ht; i++) vexpandRows.add(i);
   }
   const colT = Array.from({ length: cols }, (_, i) => (w.columnHomogeneous ? "1fr" : hexpandCols.has(i) ? "minmax(0, 1fr)" : "auto")).join(" ");
-  const rowT = Array.from({ length: rows }, (_, i) => (w.rowHomogeneous ? "1fr" : vexpandRows.has(i) ? "minmax(0, 1fr)" : "auto")).join(" ");
+  // An expanding row still gets at least its children's minimum height, as in GTK (a memo's
+  // scrolled window keeps its CSS `min-height`): with `minmax(0, 1fr)` a grid squeezed by its
+  // container collapsed the row to nothing and the memo overlapped the rows below it.
+  const rowT = Array.from({ length: rows }, (_, i) => (w.rowHomogeneous ? "1fr" : vexpandRows.has(i) ? "minmax(auto, 1fr)" : "auto")).join(" ");
   return (
     <div {...baseProps(w, "", { display: "grid", gridTemplateColumns: colT, gridTemplateRows: rowT, alignContent: vexpandRows.size > 0 || w.rowHomogeneous ? "stretch" : "start", justifyContent: hexpandCols.size > 0 || w.columnHomogeneous ? "stretch" : "start", columnGap: w.columnSpacing, rowGap: w.rowSpacing, padding: w.borderWidth || undefined, ...layout })}>
       {w.children.map((c) => {

@@ -333,6 +333,19 @@ export function TreeViewView({ w, layout }: { w: TreeView; layout?: LayoutStyle 
     }
   };
 
+  /**
+   * GTK delivers "button-press-event" for clicks anywhere in the tree view, including the blank
+   * area below the rows (e.g. a context menu for an empty tree); row clicks are handled above.
+   */
+  const onBlankMouseDown = (e: React.MouseEvent) => {
+    if (fromPortal(e)) return;
+    const t = e.target as HTMLElement;
+    if (t.closest?.("[data-path], .gtk-treeview-header, .gtk-column-resizer")) return;
+    if (w.editing) w.stopEditing(false);
+    const handled = w.emit("button-press-event", evButton(e, e.detail === 2 ? "EventType2buttonPress" : "EventTypeButtonPress"));
+    if (handled === true) e.preventDefault();
+  };
+
   const onRowDoubleClick = (row: VisibleRow, e: React.MouseEvent) => {
     if (fromPortal(e)) return;
     if (editTimer.current) {
@@ -501,6 +514,7 @@ export function TreeViewView({ w, layout }: { w: TreeView; layout?: LayoutStyle 
       onKeyDown={onKeyDown}
       onDragOver={(e) => onDragOver(null, e)}
       onDrop={onDrop}
+      onMouseDown={onBlankMouseDown}
       onContextMenu={(e) => e.preventDefault()}
       style={{ ...props.style, display: "grid", gridTemplateColumns: template, alignContent: "start" }}
     >

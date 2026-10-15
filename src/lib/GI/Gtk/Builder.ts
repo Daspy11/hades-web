@@ -137,12 +137,14 @@ function applyProperty(obj: GObject, cls: string, name: string, value: string, a
     case "sensitive":
       if (w instanceof Widget) w.sensitive = bool(value);
       return;
+    case "show_arrow":
+      if (w instanceof W.Toolbar) w.showArrow = bool(value);
+      return;
     case "toolbar_style":
     case "window_position":
     case "icon":
     case "role":
     case "accel_group":
-    case "show_arrow":
     case "is_important":
     case "homogeneous":
     case "draw_as_radio":

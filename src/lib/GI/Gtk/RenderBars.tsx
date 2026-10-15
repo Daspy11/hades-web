@@ -2,7 +2,7 @@
  * React rendering of toolbars, menu bars and popup menus, using Radix Toolbar, Menubar and
  * DropdownMenu primitives.
  */
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import * as RToolbar from "@radix-ui/react-toolbar";
 import * as Menubar from "@radix-ui/react-menubar";
 import * as Dropdown from "@radix-ui/react-dropdown-menu";
@@ -235,18 +235,127 @@ function ToolItemView({ it }: { it: Widget }) {
   return <WidgetView w={it} />;
 }
 
+/** Width of the overflow arrow button (`.gtk-toolbar-arrow`), including its margins. */
+const toolbarArrowWidth = 30;
+
+/**
+ * The natural width of a rendered tool item, including margins. An expanding item (a spacer or
+ * a separator with `expand`) only needs its minimum width, as in GTK.
+ */
+function toolItemWidth(it: Widget, el: HTMLElement): number {
+  const cs = getComputedStyle(el);
+  const margins = (parseFloat(cs.marginLeft) || 0) + (parseFloat(cs.marginRight) || 0);
+  if (it instanceof W.ToolItem && it.expand) return margins;
+  return el.getBoundingClientRect().width + margins;
+}
+
+/**
+ * GTK's menu proxy for a tool item in the overflow menu: a tool button becomes a menu item with
+ * its label, a menu tool button also gets its menu as a submenu, a drawn separator becomes a
+ * separator, and anything else (an invisible spacer, a custom tool item) is left out.
+ */
+function ToolItemProxy({ it }: { it: Widget }) {
+  useWidget(it);
+  if (it instanceof W.SeparatorToolItem) return it.draw ? <Dropdown.Separator className="gtk-menu-separator" /> : null;
+  if (!(it instanceof W.ToolButton)) return null;
+  const label = it.label ? (it.useUnderline ? stripMnemonic(it.label) : it.label) : it.tooltip ?? "";
+  const content = (
+    <>
+      <span className="gtk-menu-icon" />
+      <span className="gtk-menu-label">{label}</span>
+    </>
+  );
+  if (it instanceof W.MenuToolButton && it.menu) {
+    return (
+      <Dropdown.Sub>
+        <Dropdown.SubTrigger className="gtk-menu-item" disabled={!itemEnabled(it)}>
+          {content}
+          <span className="gtk-menu-arrow">›</span>
+        </Dropdown.SubTrigger>
+        <Dropdown.Portal>
+          <Dropdown.SubContent className="gtk-menu" sideOffset={-2}>
+            <MenuItemsView menu={it.menu} F={Dropdown} />
+          </Dropdown.SubContent>
+        </Dropdown.Portal>
+      </Dropdown.Sub>
+    );
+  }
+  return (
+    <Dropdown.Item className="gtk-menu-item" disabled={!itemEnabled(it)} onSelect={() => it.click()}>
+      {content}
+    </Dropdown.Item>
+  );
+}
+
 export function ToolbarView({ w, layout }: { w: W.Toolbar; layout?: LayoutStyle }) {
   useWidget(w);
+  useActionsVersion();
   const props = baseProps(w, "", layout);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const setRef = (el: HTMLDivElement | null) => {
+    rootRef.current = el;
+    props.ref(el);
+  };
+  const horizontal = w.orientation !== "OrientationVertical";
+  const items = w.children.filter((c) => c.visible && !c.destroyed);
+  // GTK `show-arrow`: the number of leading items that fit; the rest go into the overflow menu.
+  const [nShown, setNShown] = useState(Number.POSITIVE_INFINITY);
+  const widths = useRef(new Map<number, number>());
+  const itemKey = items.map((c) => c.objectId).join(",");
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    if (!root || !horizontal || !w.showArrow) {
+      if (nShown !== Number.POSITIVE_INFINITY) setNShown(Number.POSITIVE_INFINITY);
+      return;
+    }
+    const fit = () => {
+      // Measure the items that are rendered (the first ones, in order, before the arrow).
+      const els = Array.from(root.children).filter((el) => !(el as HTMLElement).classList.contains("gtk-toolbar-arrow")) as HTMLElement[];
+      const shown = Math.min(items.length, els.length);
+      for (let i = 0; i < shown; i++) widths.current.set(items[i].objectId, toolItemWidth(items[i], els[i]));
+      const cs = getComputedStyle(root);
+      const avail = root.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
+      const ws = items.map((c) => widths.current.get(c.objectId) ?? 34);
+      const total = ws.reduce((a, b) => a + b, 0);
+      let n = items.length;
+      if (total > avail + 0.5) {
+        n = 0;
+        let acc = toolbarArrowWidth;
+        while (n < items.length && acc + ws[n] <= avail + 0.5) acc += ws[n++];
+      }
+      setNShown((old) => (old === n || (old >= items.length && n >= items.length) ? old : n));
+    };
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(root);
+    return () => ro.disconnect();
+  });
+  const shownItems = nShown >= items.length ? items : items.slice(0, nShown);
+  const overflow = nShown >= items.length ? [] : items.slice(nShown);
   return (
     <RToolbar.Root
-      ref={props.ref as any}
+      ref={setRef}
       className={props.className}
       style={props.style}
-      orientation={w.orientation === "OrientationVertical" ? "vertical" : "horizontal"}
+      orientation={horizontal ? "horizontal" : "vertical"}
       loop
+      data-items={itemKey}
     >
-      {w.children.map((c) => <ToolItemView key={c.objectId} it={c} />)}
+      {shownItems.map((c) => <ToolItemView key={c.objectId} it={c} />)}
+      {overflow.length > 0 ? (
+        <Dropdown.Root modal={false}>
+          <Dropdown.Trigger asChild>
+            <RToolbar.Button className="gtk-toolbutton gtk-toolbar-arrow" aria-label="More tools">
+              <img src={iconUrl("pan-down-symbolic", 16) ?? undefined} width={16} height={16} alt="" />
+            </RToolbar.Button>
+          </Dropdown.Trigger>
+          <Dropdown.Portal>
+            <Dropdown.Content className="gtk-menu" align="end" sideOffset={2}>
+              {overflow.map((c) => <ToolItemProxy key={c.objectId} it={c} />)}
+            </Dropdown.Content>
+          </Dropdown.Portal>
+        </Dropdown.Root>
+      ) : null}
     </RToolbar.Root>
   );
 }

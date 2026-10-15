@@ -975,8 +975,8 @@ export function withPDFSurface<A>(path: string, w: number, h: number, act: (s: P
   return withPdfSurface(path, w, h, act);
 }
 
-/** Minimal PDF writer for recorded vector drawings (paths, fills, strokes, text). */
-function svgToPdf(target: SvgTarget, w: number, h: number): Uint8Array {
+/** Minimal PDF writer for recorded vector drawings (paths, fills, strokes, text, images). */
+function svgToPdf(target: SvgTarget, w: number, h: number, images: readonly PdfImage[] = []): Uint8Array {
   // Re-record via a PostScript-like operator stream in PDF syntax.
   const ps = target as unknown as { out: string[] };
   void ps;
@@ -984,10 +984,16 @@ function svgToPdf(target: SvgTarget, w: number, h: number): Uint8Array {
   const objects: string[] = [];
   objects.push("<< /Type /Catalog /Pages 2 0 R >>");
   objects.push("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
-  objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${fmt(w)} ${fmt(h)}] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> >>`);
+  // Image n is object 7 + 2n, its soft mask 8 + 2n.
+  const xobjects = images.map((_, n) => `/Im${n} ${7 + 2 * n} 0 R`).join(" ");
+  objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${fmt(w)} ${fmt(h)}] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R >>${xobjects ? ` /XObject << ${xobjects} >>` : ""} >> >>`);
   objects.push(`<< /Length ${content.length} >>\nstream\n${content}\nendstream`);
-  objects.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
-  objects.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>");
+  objects.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
+  objects.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>");
+  images.forEach((im, n) => {
+    objects.push(`<< /Type /XObject /Subtype /Image /Width ${im.width} /Height ${im.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /SMask ${8 + 2 * n} 0 R /Filter /ASCIIHexDecode /Length ${im.rgb.length} >>\nstream\n${im.rgb}\nendstream`);
+    objects.push(`<< /Type /XObject /Subtype /Image /Width ${im.width} /Height ${im.height} /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /ASCIIHexDecode /Length ${im.alpha.length} >>\nstream\n${im.alpha}\nendstream`);
+  });
   let pdf = "%PDF-1.4\n";
   const offsets: number[] = [];
   objects.forEach((o, i) => {
@@ -1050,22 +1056,105 @@ export class PdfTarget extends Recorder {
     this.emitPath();
     this.out.push(rule === "evenodd" ? "W* n" : "W n");
   }
-  drawImage(): void {
-    // Images are omitted from PDF output.
+  /** Images drawn so far, written as image XObjects `/Im0`, `/Im1`, ... (with a soft mask). */
+  readonly images: PdfImage[] = [];
+  drawImage(img: CanvasImageSource, x: number, y: number, w: number, h: number): void {
+    // Rasterise the image (at least at its drawn size) and place it with its transformation.
+    try {
+      const sc = this.strokeScale();
+      const pw = Math.max(1, Math.round(w * sc * 2)), ph = Math.max(1, Math.round(h * sc * 2));
+      const c = document.createElement("canvas");
+      c.width = pw;
+      c.height = ph;
+      const ctx = c.getContext("2d")!;
+      ctx.drawImage(img, 0, 0, pw, ph);
+      const data = ctx.getImageData(0, 0, pw, ph).data;
+      let rgb = "", alpha = "";
+      for (let i = 0; i < data.length; i += 4) {
+        rgb += data[i].toString(16).padStart(2, "0") + data[i + 1].toString(16).padStart(2, "0") + data[i + 2].toString(16).padStart(2, "0");
+        alpha += data[i + 3].toString(16).padStart(2, "0");
+        if ((i / 4) % 32 === 31) {
+          rgb += "\n";
+          alpha += "\n";
+        }
+      }
+      const n = this.images.length;
+      this.images.push({ width: pw, height: ph, rgb: rgb + ">", alpha: alpha + ">" });
+      // Image space is the unit square, y up: map it onto the destination rectangle.
+      const m = this.st.m;
+      const [ox, oy] = apply(m, x, y + h);
+      this.out.push("q", `${fmt(m.a * w)} ${fmt(-m.b * w)} ${fmt(-m.c * h)} ${fmt(m.d * h)} ${fmt(ox)} ${fmt(this.height - oy)} cm`, `/Im${n} Do`, "Q");
+    } catch {
+      // Cross-origin images cannot be read back; skip them.
+    }
   }
   fillText(text: string, x: number, y: number): void {
     const f = parseFont(this.st.font);
     const [dx, dy] = apply(this.st.m, x, y);
     const sz = f.size * this.strokeScale();
     const off = this.st.textBaseline === "top" ? sz * 0.8 : this.st.textBaseline === "middle" ? sz * 0.35 : 0;
-    const font = f.weight === "bold" || f.weight === "700" ? "F2" : "F1";
+    const bold = f.weight === "bold" || Number(f.weight) >= 600;
+    const font = bold ? "F2" : "F1";
     this.rgb(this.st.fillStyle, "rg");
-    const s = text.replace(/[\\()]/g, (m) => "\\" + m).replace(/[^\x20-\x7e]/g, "?");
-    this.out.push(`BT /${font} ${fmt(sz)} Tf ${fmt(dx)} ${fmt(this.height - dy - off)} Td (${s}) Tj ET`);
+    const codes = pdfWinAnsi(text);
+    const s = codes.map((c) => (c === 0x28 || c === 0x29 || c === 0x5c ? "\\" + String.fromCharCode(c) : c >= 0x20 && c < 0x7f ? String.fromCharCode(c) : "\\" + c.toString(8).padStart(3, "0"))).join("");
+    // The layout was measured with the drawing font; Helvetica has other widths, so each run is
+    // scaled horizontally to the measured width (otherwise runs overlap or overflow boxes).
+    const helvetica = codes.reduce((a, c) => a + helveticaWidth(c, bold), 0) * f.size / 1000;
+    let measured = helvetica;
+    try {
+      measured = this.measureText(text).width;
+    } catch {
+      // No canvas (tests): keep Helvetica's own widths.
+    }
+    const tz = helvetica > 0 && measured > 0 ? Math.max(50, Math.min(200, (100 * measured) / helvetica)) : 100;
+    this.out.push(`BT /${font} ${fmt(sz)} Tf ${fmt(tz)} Tz ${fmt(dx)} ${fmt(this.height - dy - off)} Td (${s}) Tj ET`);
   }
   content(): string {
     return this.out.join("\n");
   }
+}
+
+/** An image of a PDF page: RGB and alpha samples as ASCII hex (terminated by ">"). */
+interface PdfImage {
+  readonly width: number;
+  readonly height: number;
+  readonly rgb: string;
+  readonly alpha: string;
+}
+
+/** WinAnsiEncoding codes of the text's characters (unknown characters become "?"). */
+function pdfWinAnsi(text: string): number[] {
+  const extra: Record<string, number> = {
+    "€": 0x80, "‚": 0x82, "ƒ": 0x83, "„": 0x84, "…": 0x85, "†": 0x86, "‡": 0x87, "ˆ": 0x88, "‰": 0x89,
+    "Š": 0x8a, "‹": 0x8b, "Œ": 0x8c, "Ž": 0x8e, "‘": 0x91, "’": 0x92, "“": 0x93, "”": 0x94, "•": 0x95,
+    "–": 0x96, "—": 0x97, "˜": 0x98, "™": 0x99, "š": 0x9a, "›": 0x9b, "œ": 0x9c, "ž": 0x9e, "Ÿ": 0x9f,
+  };
+  const r: number[] = [];
+  for (const ch of text) {
+    const c = ch.codePointAt(0)!;
+    if ((c >= 0x20 && c < 0x7f) || (c >= 0xa0 && c <= 0xff)) r.push(c);
+    else if (extra[ch] !== undefined) r.push(extra[ch]);
+    else r.push(0x3f);
+  }
+  return r;
+}
+
+/** Advance widths (per 1000 em) of Helvetica and Helvetica-Bold for WinAnsi codes 0x20-0x7E. */
+const helveticaWidths: readonly (readonly number[])[] = [
+  [278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278, 556, 556, 556, 556,
+    556, 556, 556, 556, 556, 556, 278, 278, 584, 584, 584, 556, 1015, 667, 667, 722, 722, 667, 611, 778,
+    722, 278, 500, 667, 556, 833, 722, 778, 667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, 278,
+    278, 278, 469, 556, 333, 556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500, 222, 833, 556, 556,
+    556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500, 334, 260, 334, 584],
+  [278, 333, 474, 556, 556, 889, 722, 238, 333, 333, 389, 584, 278, 333, 278, 278, 556, 556, 556, 556,
+    556, 556, 556, 556, 556, 556, 333, 333, 584, 584, 584, 611, 975, 722, 722, 722, 722, 667, 611, 778,
+    722, 278, 556, 722, 611, 833, 722, 778, 667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, 333,
+    278, 333, 584, 556, 333, 556, 611, 556, 611, 556, 333, 611, 611, 278, 278, 556, 278, 889, 611, 611,
+    611, 611, 389, 556, 333, 611, 556, 778, 556, 556, 500, 389, 280, 389, 584],
+];
+function helveticaWidth(code: number, bold: boolean): number {
+  return code >= 0x20 && code < 0x7f ? helveticaWidths[bold ? 1 : 0][code - 0x20] : 556;
 }
 
 /** A PDF surface. `pdfBytes()` produces the document. */
@@ -1081,7 +1170,7 @@ export class PdfSurface extends Surface {
   pdfBytes(): Uint8Array {
     const svg = new SvgTarget();
     pdfOps.set(svg, this.target.content());
-    return svgToPdf(svg, this.width, this.height);
+    return svgToPdf(svg, this.width, this.height, this.target.images);
   }
 }
 /** `withPDFSurface` using the PDF recorder. */

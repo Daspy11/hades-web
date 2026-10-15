@@ -649,3 +649,5 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .welcome-gadget .gtk-label { opacity: 1; }
 .welcome-doc-button { background: #28267c !important; color: #fff !important; border-color: #1d1b5e !important; }
 .reportParameters { min-width: 450px; }
+/* Toolbar overflow arrow (GTK `show-arrow`). */
+.gtk-toolbar-arrow { min-width: 28px; margin-left: 2px; padding: 3px 4px; }

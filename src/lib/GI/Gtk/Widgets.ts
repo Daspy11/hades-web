@@ -1609,10 +1609,10 @@ export function onMenuItemActivate(m: MenuItem, cb: () => void): SignalHandlerId
 /**
  * GTK's page menu for a notebook with `enable-popup`, popped up by a right click in the tab
  * area: one item per page, labelled with the page's menu label (else its tab label's text, else
- * "Page N"), which switches to that page.
+ * "Page N"), which switches to that page. Returns the menu, or `null` if there is none.
  */
-export function notebookPopupPageMenu(nb: Notebook): boolean {
-  if (!nb.popupEnabled || nb.pages.length === 0) return false;
+export function notebookPopupPageMenu(nb: Notebook): Menu | null {
+  if (!nb.popupEnabled || nb.pages.length === 0) return null;
   const menu = menuNew();
   nb.pages.forEach((p, i) => {
     const text = p.menuLabel instanceof Label ? labelGetText(p.menuLabel)
@@ -1625,7 +1625,7 @@ export function notebookPopupPageMenu(nb: Notebook): boolean {
     menuShellAppend(menu, item);
   });
   menuPopupAtPointer(menu, null);
-  return true;
+  return menu;
 }
 
 export class CheckMenuItem extends MenuItem {
@@ -1677,15 +1677,27 @@ export class Toolbar extends Container {
   override readonly kind: string = "toolbar";
   orientation: Orientation = "OrientationHorizontal";
   toolbarStyle: ToolbarStyle = "ToolbarStyleBothHoriz";
+  /** GTK `show-arrow` (default true): items that do not fit go into an overflow menu. */
+  showArrow = true;
   override setProperty(name: string, value: unknown): void {
     if (name === "toolbarStyle") {
       this.toolbarStyle = value as ToolbarStyle;
+      this.changed();
+    } else if (name === "showArrow") {
+      this.showArrow = value as boolean;
       this.changed();
     } else super.setProperty(name, value);
   }
 }
 export function toolbarNew(): Toolbar {
   return new Toolbar();
+}
+export function toolbarSetShowArrow(t: Toolbar, b: boolean): void {
+  t.showArrow = b;
+  t.changed();
+}
+export function toolbarGetShowArrow(t: Toolbar): boolean {
+  return t.showArrow;
 }
 export function toolbarSetStyle(t: Toolbar, style: ToolbarStyle): void {
   t.toolbarStyle = style;
