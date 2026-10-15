@@ -1,8 +1,10 @@
 # ex: Model.GI.Export
 
-File: `src/hades/src/Model/GI/Export.ts` (tests: `Export.test.ts` next to it, 3 tests: null PNG
+File: `src/hades/src/Model/GI/Export.ts` (tests: `Export.test.ts` next to it, 9 tests: null PNG
 decoding, image file naming, a self-contained HTML report written through a mocked
-`@/lib/System/IO`). Every definition of `hades/src/Model/GI/Export.hs` is ported, including the
+`@/lib/System/IO`; review additions: preview tab opened first and navigated, fallback to
+`showUriOnWindow`, tab closed on failure, 8-hour preview cleaning, missing icons, `writeReportToFile`
+HTML dispatch). Every definition of `hades/src/Model/GI/Export.hs` is ported, including the
 `where` helpers (`imagePath`, `writeImage`, `binaryResourceFunc`, exported for tests). Demo:
 `src/scratch/exDemo.ts` (`?demo=ex`, `&file=1..4` picks the example model): image resources of
 two icons, a missing icon and the first two diagrams of the model, the HTML report in an iframe,
@@ -15,9 +17,14 @@ downloads; the matrix `.xlsx` written through a stubbed `showSaveFilePicker`).
 * `previewFolder(): Promise<FilePath>` → `"/memory/.dsmPreviews"`.
 * `previewReport(cls: HasDiagrams<HadesRender, V>, model, title, blks, imgs): Promise<void>`.
   BasicTypes: `performIO(ctx, () => previewReport(cls, model, title, blks, imgs))` (performIO
-  thunks may return a Promise). It opens the report in a new tab (`Gtk.showUriOnWindow` with a
-  blob URL), so call it soon after the user's click (the run dialog's OK) to stay inside the
-  browser's popup allowance.
+  thunks may return a Promise). Review fix: it now opens an empty tab *first*, synchronously
+  (`openPreviewTab()`: `window.open("", "_blank")`, opener cleared, "Preparing the report
+  preview…"), then renders the images and writes the report, and finally points that tab at the
+  blob URL (`tab.location.replace`). Browsers only allow a tab ~5 s after the user's click and
+  a blocked `noopener` popup fails silently; a report with many diagrams can take longer than
+  that to render. If no tab could be opened it falls back to `Gtk.showUriOnWindow` as before;
+  on a failure the tab is closed. So call it directly from the user's click (the run dialog's OK
+  resumes the script synchronously enough).
 * `previewFolderClean(): Promise<void>` (ModelMain calls it at start-up; harmless, never throws
   IO errors).
 * `getImageResources(cls, model, refs): Promise<ImageMap>`; `ImageMap` =
@@ -31,7 +38,7 @@ downloads; the matrix `.xlsx` written through a stubbed `showSaveFilePicker`).
 * `writeMatrixToFile(book: Xlsx): Promise<void>` (save picker titled "Export matrix as", ".xlsx"
   appended by `checkExtension`). BasicTypes: build the book inside the `performIO` thunk (see mx.md):
   `performIO(ctx, () => writeMatrixToFile(matrixBook(cls, model, matrix, title, cells)))`.
-* Also exported: `binaryResourceFunc(cls, model, iconTheme, ref, target: RelTargetType)`,
+* Also exported: `openPreviewTab(): Window | null`, `binaryResourceFunc(cls, model, iconTheme, ref, target: RelTargetType)`,
   `imagePath(ref, files)`, `writeImage(base, files)`, `imageDataUri(name, bytes)`,
   `base64DecodeLenient(s)`.
 
@@ -65,5 +72,7 @@ downloads; the matrix `.xlsx` written through a stubbed `showSaveFilePicker`).
 ## Known gaps
 
 * `writeReportToFile` with `ReportHtml` cannot produce the desktop's folder layout (see above).
-* Not tested with the real `BasicTypes` / `ModelMain` (not ported yet); exercised through the
-  demo with `Causality.BowTieTestModel` and `Model.Matrices.testing.RiskModel`.
+* Review: exercised in the real DSM app (headless Chrome): preview of "Safety Case" (example 1,
+  6 SVG images) and "Argument Report" (example 2, 42 images, tab shown at 0.4 s and filled at
+  1.8 s), "Write to File" as HTML (download), "Export to Excel" of "Risk Register" (example 3;
+  checked with openpyxl).

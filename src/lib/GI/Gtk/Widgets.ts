@@ -1606,6 +1606,28 @@ export function onMenuItemActivate(m: MenuItem, cb: () => void): SignalHandlerId
   return m.connect("activate", cb);
 }
 
+/**
+ * GTK's page menu for a notebook with `enable-popup`, popped up by a right click in the tab
+ * area: one item per page, labelled with the page's menu label (else its tab label's text, else
+ * "Page N"), which switches to that page.
+ */
+export function notebookPopupPageMenu(nb: Notebook): boolean {
+  if (!nb.popupEnabled || nb.pages.length === 0) return false;
+  const menu = menuNew();
+  nb.pages.forEach((p, i) => {
+    const text = p.menuLabel instanceof Label ? labelGetText(p.menuLabel)
+      : p.tabLabel instanceof Label ? labelGetText(p.tabLabel) : `Page ${i + 1}`;
+    const item = menuItemNewWithLabel(text);
+    onMenuItemActivate(item, () => {
+      const n = nb.pages.indexOf(p);
+      if (n >= 0) nb.switchTo(n);
+    });
+    menuShellAppend(menu, item);
+  });
+  menuPopupAtPointer(menu, null);
+  return true;
+}
+
 export class CheckMenuItem extends MenuItem {
   override readonly kind: string = "checkMenuItem";
   active = false;

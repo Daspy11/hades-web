@@ -1,6 +1,11 @@
 # sc: DSM.SafetyCase and the `dsm` program (`dsm/Main`)
 
-Files: `src/dsm/DSM/SafetyCase.ts` (+ `SafetyCase.test.ts`, 7 tests: each example `.dsm` loads as a
+Files: `src/dsm/DSM/SafetyCase.ts` (+ `SafetyCase.test.ts`, 18 tests; the review added tests of the
+instance members (causal JSON read as an unsupported package, names, `isDiagram`,
+`entityCanHaveChild`, `diagramEntityTypes`, `queryAvatars`, `getDiagramWrapper`,
+`diagramMapAvatars`), the tree/editable menus, and of BasicTypes' `matrixExport`, `matrixRun`,
+`lookupEdit`, `basicsActivation`, `reportRun`, `reportPreview` scripts stepped on example 3; the
+original 7: each example `.dsm` loads as a
 `SafetyModel` model; examples 1 and 2 are written back to identical JSON, every entity of them
 round-trips through `JSON_SafetyModel`; examples 3 and 4 are migrated on reading and stable after
 that; reflective defaults build without recursion) and `src/dsm/Main.ts` (replaces the placeholder;

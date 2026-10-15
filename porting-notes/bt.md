@@ -63,6 +63,8 @@ of `hades/src/Model/Abstract/BasicTypes.hs` is ported, including the unexported 
 
 ## Known gaps
 
-* Exercised only through the toy model in the test (JSON, reflective, menus); the scripts
-  (`matrixExport`, `reportPreview`, ...) have not been run end-to-end inside the real app yet,
-  because DSM.SafetyCase / ModelMain are not ported.
+* Review: the scripts are now stepped in `src/dsm/DSM/SafetyCase.test.ts` on example 3 and were
+  run end-to-end in the real DSM app (headless Chrome): Run/Edit Matrix, Export to Excel,
+  Preview Report, Write to File (HTML), Edit Report (renaming updates the tree), Edit Lookup
+  Table (double-click), Add lookup table/query from the root menu. No differences from the
+  Haskell were found.

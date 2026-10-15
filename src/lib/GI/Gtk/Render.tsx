@@ -774,6 +774,10 @@ function NotebookView({ w, layout }: { w: W.Notebook; layout?: LayoutStyle }) {
             ref={listRef}
             className={"gtk-notebook-tabs" + (w.scrollable ? " scrollable" : "") + (dropAt !== null && w.pages.length === 0 ? " drop-target" : "")}
             loop
+            onContextMenu={(e) => {
+              // GTK `enable-popup`: a right click in the tab area pops up the page menu.
+              if (W.notebookPopupPageMenu(w)) e.preventDefault();
+            }}
           >
             {w.pages.map((p, i) => (
               <Tabs.Trigger key={p.child.objectId} value={String(p.child.objectId)} asChild>
