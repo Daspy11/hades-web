@@ -69,6 +69,38 @@ type classes, lenses, monads, arrows and FRP map onto TypeScript. The main subst
   confirmation, and the browser's back and forward buttons move between the diagrams you
   have visited.
 
+## Demo Programs and URL Options
+
+* `?open=<example>` opens a bundled example at start-up, for instance
+  `?open=1 Quick Guide to the DSM`. It stands in for the desktop program's file argument.
+* `?demo-arrow` runs the banana-ui GTK demo (`banana-ui/gtk/demo-arrow`).
+* `?demo-webit` runs the webits demo (`banana-ui/webits/demo-webit`).
+* In development only, `?demo=<name>` runs one of the scratch test pages in `src/scratch/`.
+
+## Differences from the Desktop Program
+
+Each of these is marked with a `// Web:` comment in the code.
+
+* Dialogs opened from inside a diagram, such as a box's properties, have no Apply button.
+  Applying re-runs the rest of the editing script, which cannot be done safely inside a
+  diagram editing step.
+* An HTML report is a single self-contained file with its images embedded, rather than a
+  folder of files. Report previews open in a new browser tab.
+* Where the browser has no File System Access API, saving downloads the file. A small in-app
+  dialog asks for the name first.
+* Quitting shows a "program finished" page. Reload to start again.
+
+Known bugs of the original are kept, so that the port behaves like it. They are listed in the
+porting notes, for example the outdented-label colouring with non-ASCII text and the column
+shift in Excel import when a header is not recognised.
+
+## Tests
+
+`npm test` runs about 1,800 tests. They include the ported HUnit and QuickCheck suites of the
+original (`src/hades/test`, `src/banana-ui/webits/test`), round trips of the four bundled
+example models through every entity type, and checks of generated `.docx`, `.xlsx`, SVG and PDF
+files.
+
 ## The Reactive Banana Fork
 
 HADES depends on the [reactive-banana](https://hackage.haskell.org/package/reactive-banana)

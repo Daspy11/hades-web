@@ -461,6 +461,9 @@ module that imports `GI.*`.** Summary of the rules:
 
 ## 12. Cross-module notes from completed ports
 
+Notes for the later modules (GTK layer, application, DSM, webits) are in
+[`porting-notes/`](porting-notes/README.md), one file per group of modules.
+
 Decisions made while porting that other modules depend on. Read before importing these modules.
 
 * **Reflective instances** (`Model.Reflection.Reflective`): `variantUserLabel` is a *required*
