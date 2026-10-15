@@ -23,7 +23,10 @@ async function loadFonts(): Promise<void> {
 }
 
 // Development entry points: `?demo=<name>` runs `src/scratch/<name>Demo.ts` instead of the app.
-const scratchDemos = import.meta.glob<{ main(): void }>("./scratch/*Demo.ts");
+// Scratch demos are development aids and are left out of production builds.
+const scratchDemos: Record<string, () => Promise<{ main(): void }>> = import.meta.env.DEV
+  ? import.meta.glob<{ main(): void }>("./scratch/*Demo.ts")
+  : {};
 const params = new URLSearchParams(location.search);
 const demo = params.get("demo") ?? (params.get("toolkit-demo") !== null ? "toolkit" : null);
 // The demo programs of the original repository: `?demo-arrow` and `?demo-webit`.
