@@ -396,11 +396,28 @@ export function handleAccelerator(e: KeyboardEvent): void {
   }
 }
 
+/**
+ * Web: a GTK application never shows the browser's context menu. Right clicks reach the widgets
+ * as button-press events (which may pop up the application's own menu), and the browser menu is
+ * suppressed everywhere in the page, including over popup menus that open under the pointer
+ * before the browser's `contextmenu` event arrives. Editable text keeps the browser menu, where
+ * GTK would show its own Cut/Copy/Paste menu.
+ */
+export function suppressBrowserContextMenu(e: MouseEvent): void {
+  const t = e.target as HTMLElement | null;
+  const editable = !!t && (t.isContentEditable || t.closest("input, textarea") !== null);
+  if (!editable) e.preventDefault();
+}
+
 export function GtkRoot(): React.ReactElement {
   const tops = useToplevels();
   useEffect(() => {
     window.addEventListener("keydown", handleAccelerator);
-    return () => window.removeEventListener("keydown", handleAccelerator);
+    window.addEventListener("contextmenu", suppressBrowserContextMenu);
+    return () => {
+      window.removeEventListener("keydown", handleAccelerator);
+      window.removeEventListener("contextmenu", suppressBrowserContextMenu);
+    };
   }, []);
   return (
     <Tooltip.Provider delayDuration={600} skipDelayDuration={300}>
